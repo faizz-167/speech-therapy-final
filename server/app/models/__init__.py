@@ -4,3 +4,7 @@ from app.models.content import (
     EvaluationTarget, FeedbackRule, PromptScoring,
     TaskDefectMapping, TaskScoringWeights,
 )
+from app.models.baseline import (
+    BaselineAssessment, BaselineDefectMapping, BaselineSection,
+    BaselineItem, PatientBaselineResult, BaselineItemResult,
+)
