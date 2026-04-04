@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.auth import require_patient
 from app.models.users import Patient
+from app.models.content import Defect
 from app.models.baseline import (
     BaselineAssessment, BaselineDefectMapping, BaselineSection,
     BaselineItem, PatientBaselineResult, BaselineItemResult,
@@ -20,6 +21,8 @@ from app.schemas.baseline import (
 
 router = APIRouter()
 
+BASELINE_ITEM_CAP = 7
+
 
 def score_to_level(score: float) -> str:
     if score >= 80:
@@ -27,6 +30,20 @@ def score_to_level(score: float) -> str:
     elif score >= 70:
         return "medium"
     return "easy"
+
+
+def _allocate_items(items_by_group: dict[str, list], cap: int) -> dict[str, list]:
+    """Distribute `cap` items evenly across groups. Extra items go to earlier groups."""
+    n = len(items_by_group)
+    if n == 0:
+        return {}
+    base = cap // n
+    remainder = cap % n
+    allocated: dict[str, list] = {}
+    for idx, (key, items) in enumerate(items_by_group.items()):
+        target = base + (1 if idx < remainder else 0)
+        allocated[key] = items[:target]
+    return allocated
 
 
 @router.get("/exercises", response_model=list[BaselineAssessmentOut])
@@ -37,41 +54,69 @@ async def get_baseline_exercises(
     if not patient.pre_assigned_defect_ids:
         raise HTTPException(400, "No defects assigned to patient")
     defect_ids = patient.pre_assigned_defect_ids.get("defect_ids", [])
+
+    # Resolve defect categories so we can balance by category
+    defect_result = await db.execute(
+        select(Defect).where(Defect.defect_id.in_(defect_ids))
+    )
+    defects = defect_result.scalars().all()
+    # Map defect_id -> category
+    defect_category: dict[str, str] = {d.defect_id: d.category for d in defects}
+    # Unique categories in assigned order
+    seen: dict[str, int] = {}
+    for did in defect_ids:
+        cat = defect_category.get(did, "general")
+        if cat not in seen:
+            seen[cat] = len(seen)
+    unique_categories = list(seen.keys())
+
+    # Get baseline IDs mapped to each assigned defect, grouped by category
     mapping_result = await db.execute(
-        select(BaselineDefectMapping.baseline_id)
+        select(BaselineDefectMapping)
         .where(BaselineDefectMapping.defect_id.in_(defect_ids))
-        .distinct()
     )
-    baseline_ids = [row[0] for row in mapping_result.fetchall()]
-    if not baseline_ids:
+    mappings = mapping_result.scalars().all()
+    # category -> set of baseline_ids
+    category_baseline_ids: dict[str, list[str]] = {c: [] for c in unique_categories}
+    seen_bids: set[str] = set()
+    for m in mappings:
+        cat = defect_category.get(m.defect_id, "general")
+        if m.baseline_id not in seen_bids:
+            category_baseline_ids.setdefault(cat, []).append(m.baseline_id)
+            seen_bids.add(m.baseline_id)
+
+    if not seen_bids:
         raise HTTPException(404, "No baseline assessments found for assigned defects")
-    result = await db.execute(
-        select(BaselineAssessment).where(BaselineAssessment.baseline_id.in_(baseline_ids))
+
+    # Load all assessments
+    all_assessments_result = await db.execute(
+        select(BaselineAssessment).where(BaselineAssessment.baseline_id.in_(list(seen_bids)))
     )
-    assessments = result.scalars().all()
-    out = []
-    for a in assessments:
-        sections_result = await db.execute(
-            select(BaselineSection)
-            .where(BaselineSection.baseline_id == a.baseline_id)
-            .order_by(BaselineSection.order_index)
-        )
-        sections = sections_result.scalars().all()
-        section_outs = []
-        for s in sections:
-            items_result = await db.execute(
-                select(BaselineItem)
-                .where(BaselineItem.section_id == s.section_id)
-                .order_by(BaselineItem.order_index)
+    all_assessments = {a.baseline_id: a for a in all_assessments_result.scalars().all()}
+
+    # Build category -> flat list of BaselineItemOut (in order)
+    category_items: dict[str, list[BaselineItemOut]] = {c: [] for c in unique_categories}
+    category_assessments: dict[str, list[BaselineAssessment]] = {c: [] for c in unique_categories}
+
+    for cat, bids in category_baseline_ids.items():
+        for bid in bids:
+            a = all_assessments.get(bid)
+            if not a:
+                continue
+            category_assessments[cat].append(a)
+            sections_result = await db.execute(
+                select(BaselineSection)
+                .where(BaselineSection.baseline_id == bid)
+                .order_by(BaselineSection.order_index)
             )
-            items = items_result.scalars().all()
-            section_outs.append(BaselineSectionOut(
-                section_id=s.section_id,
-                section_name=s.section_name,
-                instructions=s.instructions,
-                order_index=s.order_index,
-                items=[
-                    BaselineItemOut(
+            for s in sections_result.scalars().all():
+                items_result = await db.execute(
+                    select(BaselineItem)
+                    .where(BaselineItem.section_id == s.section_id)
+                    .order_by(BaselineItem.order_index)
+                )
+                for i in items_result.scalars().all():
+                    category_items[cat].append(BaselineItemOut(
                         item_id=i.item_id,
                         task_name=i.task_name,
                         instruction=i.instruction,
@@ -82,15 +127,33 @@ async def get_baseline_exercises(
                         formula_weights=i.formula_weights,
                         fusion_weights=i.fusion_weights,
                         wpm_range=i.wpm_range,
-                    )
-                    for i in items
-                ],
-            ))
+                    ))
+
+    # Apply 7-item cap balanced by category
+    allocated = _allocate_items(category_items, BASELINE_ITEM_CAP)
+
+    # Reconstruct output as a single synthetic assessment per category
+    out: list[BaselineAssessmentOut] = []
+    for cat, items in allocated.items():
+        if not items:
+            continue
+        # Use the first assessment's metadata for the section container
+        cat_assessments = category_assessments.get(cat, [])
+        first_a = cat_assessments[0] if cat_assessments else None
+        baseline_id = first_a.baseline_id if first_a else cat
+        name = first_a.name if first_a else cat
+        domain = first_a.domain if first_a else cat
         out.append(BaselineAssessmentOut(
-            baseline_id=a.baseline_id,
-            name=a.name,
-            domain=a.domain,
-            sections=section_outs,
+            baseline_id=baseline_id,
+            name=name,
+            domain=domain,
+            sections=[BaselineSectionOut(
+                section_id=f"{baseline_id}-combined",
+                section_name=f"{cat} Assessment",
+                instructions=None,
+                order_index=0,
+                items=items,
+            )],
         ))
     return out
 

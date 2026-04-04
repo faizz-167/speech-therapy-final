@@ -62,6 +62,23 @@ export default function PatientDetailPage() {
           <span className="font-black uppercase">Status:</span>
           <span className={`font-black uppercase ${patient.status === "approved" ? "text-green-700" : "text-orange-600"}`}>{patient.status}</span>
         </div>
+        {(() => {
+          const assignedDefectIds = patient.pre_assigned_defect_ids?.defect_ids ?? [];
+          const assignedDefects = defects.filter(d => assignedDefectIds.includes(d.defect_id));
+          if (assignedDefects.length === 0) return null;
+          return (
+            <div className="border-t-4 border-black pt-3 space-y-2">
+              <p className="font-black uppercase text-xs text-gray-500">Assigned Conditions</p>
+              <div className="flex flex-wrap gap-2">
+                {assignedDefects.map(d => (
+                  <span key={d.defect_id} className="border-2 border-black px-3 py-1 text-sm font-bold bg-[#FFD93D]">
+                    {d.name} <span className="text-xs font-medium text-gray-600">({d.category})</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </NeoCard>
 
       {patient.status === "pending" && (

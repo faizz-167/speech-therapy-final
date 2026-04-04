@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
 
+interface AssignedDefect { defect_id: string; name: string; category: string; }
 interface Profile {
   patient_id: string;
   full_name: string;
@@ -12,6 +13,7 @@ interface Profile {
   gender: string | null;
   status: string;
   current_streak: number;
+  assigned_defects: AssignedDefect[];
 }
 
 export default function PatientProfilePage() {
@@ -45,6 +47,19 @@ export default function PatientProfilePage() {
           <span className="font-black uppercase">{profile.status}</span>
         </div>
       </NeoCard>
+      {profile.assigned_defects && profile.assigned_defects.length > 0 && (
+        <NeoCard className="space-y-3">
+          <h2 className="font-black uppercase text-sm">Assigned Conditions</h2>
+          <div className="space-y-2">
+            {profile.assigned_defects.map((d) => (
+              <div key={d.defect_id} className="flex items-center justify-between border-2 border-black px-3 py-2">
+                <span className="font-bold">{d.name}</span>
+                <span className="text-xs font-black uppercase border-2 border-black px-2 py-0.5 bg-[#FFD93D]">{d.category}</span>
+              </div>
+            ))}
+          </div>
+        </NeoCard>
+      )}
       <NeoCard accent="secondary" className="text-center space-y-1">
         <div className="text-4xl font-black">{profile.current_streak}</div>
         <div className="font-black uppercase text-sm">Day Streak</div>

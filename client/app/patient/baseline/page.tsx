@@ -1,13 +1,55 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
 
-interface BaselineItem { item_id: string; task_name: string | null; instruction: string | null; display_content: string | null; expected_output: string | null; }
+interface BaselineItem {
+  item_id: string;
+  task_name: string | null;
+  instruction: string | null;
+  display_content: string | null;
+  expected_output: string | null;
+  response_type: string | null;
+}
 interface BaselineSection { section_id: string; section_name: string; instructions: string | null; items: BaselineItem[]; }
 interface BaselineAssessment { baseline_id: string; name: string; domain: string; sections: BaselineSection[]; }
+
+type ItemPhase = "prompt" | "recording" | "recorded" | "rated";
+
+// Emoji map for common speech therapy picture naming items
+const EMOJI_MAP: Record<string, string> = {
+  apple: "🍎", ball: "⚽", cat: "🐱", dog: "🐶", house: "🏠",
+  tree: "🌳", car: "🚗", fish: "🐟", bird: "🐦", flower: "🌸",
+  book: "📚", cup: "☕", key: "🔑", sun: "☀️", moon: "🌙",
+  star: "⭐", heart: "❤️", hand: "✋", eye: "👁️", nose: "👃",
+  shoe: "👟", hat: "🎩", chair: "🪑", bed: "🛏️", door: "🚪",
+  pen: "✏️", milk: "🥛", egg: "🥚", bread: "🍞", cake: "🎂",
+  water: "💧", fire: "🔥", cloud: "☁️", rain: "🌧️", snow: "❄️",
+  baby: "👶", boy: "👦", girl: "👧", man: "👨", woman: "👩",
+  horse: "🐎", cow: "🐄", pig: "🐷", duck: "🦆", frog: "🐸",
+  elephant: "🐘", lion: "🦁", bear: "🐻", rabbit: "🐰",
+  bus: "🚌", train: "🚂", plane: "✈️", boat: "⛵", bike: "🚲",
+  phone: "📱", lamp: "💡", clock: "⏰", bowl: "🥣", fork: "🍴",
+  spoon: "🥄", bag: "👜", kite: "🪁", leaf: "🍃", ring: "💍",
+  drum: "🥁", flag: "🚩", rope: "🪢", sock: "🧦", coat: "🧥",
+  banana: "🍌", orange: "🍊", grape: "🍇", lemon: "🍋", pear: "🍐",
+  tomato: "🍅", corn: "🌽", carrot: "🥕", potato: "🥔", cake2: "🧁",
+};
+
+function getPictureEmoji(word: string | null): string {
+  if (!word) return "🖼️";
+  const key = word.trim().toLowerCase().split(" ")[0];
+  return EMOJI_MAP[key] ?? "🖼️";
+}
+
+function isPictureNaming(item: BaselineItem): boolean {
+  if (item.response_type?.toLowerCase().includes("picture")) return true;
+  if (item.task_name?.toLowerCase().includes("picture")) return true;
+  if (item.task_name?.toLowerCase().includes("naming")) return true;
+  return false;
+}
 
 export default function BaselinePage() {
   const [assessments, setAssessments] = useState<BaselineAssessment[]>([]);
@@ -18,7 +60,15 @@ export default function BaselinePage() {
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState<{ raw_score: number; level: string } | null>(null);
 
-  const allItems = assessments.flatMap(a => a.sections.flatMap(s => s.items.map(i => ({ ...i, baseline_id: a.baseline_id, assessment_name: a.name }))));
+  // Per-item recording state
+  const [phase, setPhase] = useState<ItemPhase>("prompt");
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const mediaRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  const allItems = assessments.flatMap(a =>
+    a.sections.flatMap(s => s.items.map(i => ({ ...i, baseline_id: a.baseline_id, assessment_name: a.name })))
+  );
   const currentItem = allItems[currentItemIdx];
   const isLast = currentItemIdx === allItems.length - 1;
 
@@ -29,10 +79,55 @@ export default function BaselinePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Reset recording state when moving to a new item
+  useEffect(() => {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    setBlobUrl(null);
+    setPhase("prompt");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentItemIdx]);
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const url = URL.createObjectURL(blob);
+        setBlobUrl(url);
+        setPhase("recorded");
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mr.start();
+      mediaRef.current = mr;
+      setPhase("recording");
+    } catch {
+      setError("Microphone access denied. Please allow microphone and reload.");
+    }
+  }
+
+  function stopRecording() {
+    mediaRef.current?.stop();
+  }
+
+  function handleRetry() {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    setBlobUrl(null);
+    setPhase("prompt");
+  }
+
   function handleScore(score: number) {
     if (!currentItem) return;
     setScores(prev => ({ ...prev, [currentItem.item_id]: score }));
-    if (!isLast) setCurrentItemIdx(i => i + 1);
+    setPhase("rated");
+  }
+
+  function handleNext() {
+    if (!isLast) {
+      setCurrentItemIdx(i => i + 1);
+    }
   }
 
   async function handleSubmit() {
@@ -67,6 +162,10 @@ export default function BaselinePage() {
 
   if (!currentItem) return <ErrorBanner message="No baseline exercises found for your assigned defects." />;
 
+  const pictureTask = isPictureNaming(currentItem);
+  const scored = scores[currentItem.item_id] !== undefined;
+  const canSubmit = isLast && scored;
+
   return (
     <div className="space-y-6 animate-fade-up max-w-2xl">
       <div className="flex items-center justify-between">
@@ -76,30 +175,90 @@ export default function BaselinePage() {
         </span>
       </div>
       <div className="w-full bg-gray-200 border-2 border-black h-3">
-        <div className="bg-[#FF6B6B] h-full transition-all" style={{ width: `${((currentItemIdx) / allItems.length) * 100}%` }} />
+        <div className="bg-[#FF6B6B] h-full transition-all" style={{ width: `${(currentItemIdx / allItems.length) * 100}%` }} />
       </div>
+
+      {/* Prompt card */}
       <NeoCard className="space-y-4">
-        {currentItem.task_name && <p className="font-black uppercase text-sm text-gray-500">{currentItem.task_name}</p>}
-        {currentItem.instruction && <p className="font-bold">{currentItem.instruction}</p>}
-        {currentItem.display_content && (
-          <div className="border-4 border-black bg-[#FFD93D] p-4 text-xl font-black">{currentItem.display_content}</div>
+        {currentItem.task_name && (
+          <p className="font-black uppercase text-sm text-gray-500">{currentItem.task_name}</p>
         )}
-        {currentItem.expected_output && <p className="text-sm font-medium text-gray-600">Expected: {currentItem.expected_output}</p>}
+        {currentItem.instruction && (
+          <p className="font-bold">{currentItem.instruction}</p>
+        )}
+        {pictureTask && currentItem.display_content ? (
+          <div className="border-4 border-black bg-[#FFD93D] p-8 text-center rounded">
+            <div className="text-9xl leading-none select-none" role="img" aria-label="picture to name">
+              {getPictureEmoji(currentItem.display_content)}
+            </div>
+            <p className="sr-only">{currentItem.display_content}</p>
+          </div>
+        ) : currentItem.display_content ? (
+          <div className="border-4 border-black bg-[#FFD93D] p-4 text-xl font-black">
+            {currentItem.display_content}
+          </div>
+        ) : null}
       </NeoCard>
-      <NeoCard accent="muted" className="space-y-3">
-        <p className="font-black uppercase text-sm">Rate your performance:</p>
-        <div className="grid grid-cols-5 gap-2">
-          {[20, 40, 60, 80, 100].map(score => (
-            <NeoButton key={score} variant={scores[currentItem.item_id] === score ? "primary" : "ghost"}
-              onClick={() => handleScore(score)} size="md">
-              {score}
+
+      {/* Recording card */}
+      <NeoCard accent="muted" className="space-y-4">
+        <p className="font-black uppercase text-sm">Record your response:</p>
+
+        {phase === "prompt" && (
+          <NeoButton onClick={startRecording} className="w-full">
+            🎙 Start Recording
+          </NeoButton>
+        )}
+
+        {phase === "recording" && (
+          <div className="space-y-3 text-center">
+            <div className="text-[#FF6B6B] font-black animate-pulse text-lg">● RECORDING — speak now</div>
+            <NeoButton variant="ghost" onClick={stopRecording} className="w-full">
+              ■ Stop Recording
             </NeoButton>
-          ))}
-        </div>
-        <p className="text-xs font-medium text-gray-500">20=Poor · 40=Below Avg · 60=Average · 80=Good · 100=Excellent</p>
+          </div>
+        )}
+
+        {(phase === "recorded" || phase === "rated") && (
+          <div className="space-y-3">
+            <p className="text-sm font-bold text-green-700">Recording complete ✓</p>
+            {blobUrl && (
+              <audio controls src={blobUrl} className="w-full border-2 border-black" />
+            )}
+            <NeoButton variant="ghost" onClick={handleRetry} size="sm">
+              ↺ Retry
+            </NeoButton>
+          </div>
+        )}
+
+        {/* Self-rating — visible only after recording */}
+        {(phase === "recorded" || phase === "rated") && (
+          <div className="space-y-2 border-t-4 border-black pt-3">
+            <p className="font-black uppercase text-sm">Rate your performance:</p>
+            <div className="grid grid-cols-5 gap-2">
+              {[20, 40, 60, 80, 100].map(score => (
+                <NeoButton
+                  key={score}
+                  variant={scores[currentItem.item_id] === score ? "primary" : "ghost"}
+                  onClick={() => handleScore(score)}
+                  size="md"
+                >
+                  {score}
+                </NeoButton>
+              ))}
+            </div>
+            <p className="text-xs font-medium text-gray-500">20=Poor · 40=Below Avg · 60=Average · 80=Good · 100=Excellent</p>
+          </div>
+        )}
       </NeoCard>
-      {isLast && scores[currentItem.item_id] && (
-        <NeoButton className="w-full" onClick={handleSubmit}>Submit Baseline</NeoButton>
+
+      {/* Navigation */}
+      {phase === "rated" && (
+        canSubmit ? (
+          <NeoButton className="w-full" onClick={handleSubmit}>Submit Baseline</NeoButton>
+        ) : (
+          <NeoButton className="w-full" onClick={handleNext}>Next →</NeoButton>
+        )
       )}
     </div>
   );

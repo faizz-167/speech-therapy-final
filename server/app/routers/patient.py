@@ -6,15 +6,29 @@ from datetime import date
 from app.database import get_db
 from app.auth import require_patient
 from app.models.users import Patient
+from app.models.content import Task, TaskLevel, Prompt, Defect
 from app.models.plan import TherapyPlan, PlanTaskAssignment
-from app.models.content import Task, TaskLevel, Prompt
 from app.schemas.patient import TaskAssignmentOut, PromptOut
 
 router = APIRouter()
 
 
 @router.get("/profile")
-async def get_profile(patient: Annotated[Patient, Depends(require_patient)]):
+async def get_profile(
+    patient: Annotated[Patient, Depends(require_patient)],
+    db: AsyncSession = Depends(get_db),
+):
+    assigned_defects = []
+    if patient.pre_assigned_defect_ids:
+        defect_ids = patient.pre_assigned_defect_ids.get("defect_ids", [])
+        if defect_ids:
+            defect_result = await db.execute(
+                select(Defect).where(Defect.defect_id.in_(defect_ids))
+            )
+            assigned_defects = [
+                {"defect_id": d.defect_id, "name": d.name, "category": d.category}
+                for d in defect_result.scalars().all()
+            ]
     return {
         "patient_id": str(patient.patient_id),
         "full_name": patient.full_name,
@@ -23,6 +37,7 @@ async def get_profile(patient: Annotated[Patient, Depends(require_patient)]):
         "gender": patient.gender,
         "status": patient.status.value,
         "current_streak": patient.current_streak,
+        "assigned_defects": assigned_defects,
     }
 
 
