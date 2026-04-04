@@ -1,0 +1,29 @@
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/space-grotesk/700.css"; /* 700 is max weight for Space Grotesk */
+@import "tailwindcss";
+
+@theme inline {
+  --color-neo-bg: #FFFDF5;
+  --color-neo-accent: #FF6B6B;
+  --color-neo-secondary: #FFD93D;
+  --color-neo-muted: #C4B5FD;
+  --color-neo-black: #000000;
+  --font-sans: "Space Grotesk", sans-serif;
+}
+
+body {
+  background-color: var(--color-neo-bg);
+  font-family: var(--font-sans);
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop-in {
+  0%   { opacity: 0; transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-fade-up  { animation: fade-up 0.3s ease forwards; }
+.animate-pop-in   { animation: pop-in 0.25s ease forwards; }
