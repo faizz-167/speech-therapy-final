@@ -9,3 +9,7 @@ from app.models.baseline import (
     BaselineItem, PatientBaselineResult, BaselineItemResult,
 )
 from app.models.plan import TherapyPlan, PlanTaskAssignment
+from app.models.scoring import (
+    Session, SessionPromptAttempt, AttemptScoreDetail,
+    PatientTaskProgress, SessionEmotionSummary,
+)
