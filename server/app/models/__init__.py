@@ -8,3 +8,4 @@ from app.models.baseline import (
     BaselineAssessment, BaselineDefectMapping, BaselineSection,
     BaselineItem, PatientBaselineResult, BaselineItemResult,
 )
+from app.models.plan import TherapyPlan, PlanTaskAssignment
