@@ -1,6 +1,9 @@
+import asyncio
+import json
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+import redis.asyncio as aioredis
 from app.config import settings
 from app.routers import auth, therapist, plans, patient, baseline, session, progress
 
@@ -27,3 +30,30 @@ app.include_router(progress.router, prefix="", tags=["progress"])
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.websocket("/ws/{patient_id}")
+async def websocket_endpoint(websocket: WebSocket, patient_id: str):
+    await websocket.accept()
+    r = aioredis.from_url(settings.redis_url)
+    pubsub = r.pubsub()
+    await pubsub.subscribe(f"ws:patient:{patient_id}")
+    ping_task = None
+    try:
+        async def send_pings():
+            while True:
+                await asyncio.sleep(30)
+                await websocket.send_json({"type": "ping"})
+
+        ping_task = asyncio.create_task(send_pings())
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                data = json.loads(message["data"])
+                await websocket.send_json(data)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if ping_task:
+            ping_task.cancel()
+        await pubsub.unsubscribe()
+        await r.aclose()

@@ -28,6 +28,34 @@ class ScoringWeights:
     rule_severe_pa_score_cap: float = 45.0
 
 
+def weights_from_db_row(row) -> "ScoringWeights":
+    """Convert a TaskScoringWeights ORM row to ScoringWeights dataclass."""
+    return ScoringWeights(
+        speech_w_pa=float(row.speech_w_pa),
+        speech_w_wa=float(row.speech_w_wa),
+        speech_w_fs=float(row.speech_w_fs),
+        speech_w_srs=float(row.speech_w_srs),
+        speech_w_cs=float(row.speech_w_cs),
+        fusion_w_speech=float(row.fusion_w_speech),
+        fusion_w_engagement=float(row.fusion_w_engagement),
+        engagement_w_emotion=float(row.engagement_w_emotion),
+        engagement_w_behavioral=float(row.engagement_w_behavioral),
+        behavioral_w_rl=float(row.behavioral_w_rl),
+        behavioral_w_tc=float(row.behavioral_w_tc),
+        behavioral_w_aq=float(row.behavioral_w_aq),
+        adaptive_advance_threshold=float(row.adaptive_advance_threshold),
+        adaptive_stay_min=float(row.adaptive_stay_min),
+        adaptive_drop_threshold=float(row.adaptive_drop_threshold),
+        adaptive_consecutive_fail_limit=int(row.adaptive_consecutive_fail_limit),
+        rule_low_eng_threshold=float(row.rule_low_eng_threshold),
+        rule_low_eng_penalty=float(row.rule_low_eng_penalty),
+        rule_high_eng_threshold=float(row.rule_high_eng_threshold),
+        rule_high_eng_boost=float(row.rule_high_eng_boost),
+        rule_severe_pa_threshold=float(row.rule_severe_pa_threshold),
+        rule_severe_pa_score_cap=float(row.rule_severe_pa_score_cap),
+    )
+
+
 def score_attempt(
     pa: float,
     wa: float,
