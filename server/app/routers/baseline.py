@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.auth import require_patient
-from app.models.users import Patient
+from app.auth import require_patient, require_therapist
+from app.models.users import Patient, Therapist
 from app.models.content import Defect
 from app.models.baseline import (
     BaselineAssessment, BaselineDefectMapping, BaselineSection,
@@ -180,6 +180,7 @@ async def submit_baseline(
         severity_rating=level,
     )
     db.add(baseline_result)
+    await db.flush()
     for item_score in body.item_scores:
         db.add(BaselineItemResult(
             item_result_id=uuid.uuid4(),
@@ -224,8 +225,12 @@ async def get_baseline_result(
 @router.get("/therapist-view/{patient_id}", response_model=BaselineResultOut | None)
 async def therapist_get_baseline(
     patient_id: str,
+    therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
+    patient = await db.get(Patient, patient_id)
+    if not patient or patient.assigned_therapist_id != therapist.therapist_id:
+        raise HTTPException(404, "Patient not found")
     result = await db.execute(
         select(PatientBaselineResult)
         .where(PatientBaselineResult.patient_id == patient_id)

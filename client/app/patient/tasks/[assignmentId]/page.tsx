@@ -11,11 +11,16 @@ import { Recorder } from "@/components/patient/Recorder";
 import { ScoreDisplay } from "@/components/patient/ScoreDisplay";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
 
-type Phase = "instruction" | "record" | "uploading" | "scoring" | "scored";
+type Phase = "instruction" | "record" | "uploading" | "scoring" | "scored" | "timeout";
 
 interface PollResult {
   result: string;
   score: Record<string, unknown> | null;
+}
+
+interface RecordingMeta {
+  micActivatedAt: string;
+  speechStartAt: string | null;
 }
 
 export default function ExercisePage() {
@@ -28,13 +33,16 @@ export default function ExercisePage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [attemptNumber, setAttemptNumber] = useState<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentPrompt = prompts[promptIdx];
 
   useEffect(() => {
     Promise.all([
-      api.post<{ session_id: string }>("/session/start", {}),
+      api.post<{ session_id: string }>("/session/start", { assignment_id: assignmentId }),
       api.get<Prompt[]>(`/patient/tasks/${assignmentId}/prompts`),
     ])
       .then(([session, p]) => {
@@ -47,12 +55,28 @@ export default function ExercisePage() {
 
   useEffect(() => {
     if (!userId) return;
-    wsRef.current = createWebSocket(userId, (data) => {
-      setScore(data);
-      setPhase("scored");
-    });
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      wsRef.current = createWebSocket(userId, (data) => {
+        setScore(data);
+        setPhase("scored");
+      });
+    }, 0);
+
     return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
       wsRef.current?.close();
+      wsRef.current = null;
+      if (pollIntervalRef.current !== null) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      if (pollTimeoutRef.current !== null) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
     };
   }, [userId]);
 
@@ -66,7 +90,7 @@ export default function ExercisePage() {
     speechSynthesis.speak(utterance);
   }
 
-  async function handleRecording(blob: Blob) {
+  async function handleRecording(blob: Blob, meta: RecordingMeta) {
     if (!sessionId || !currentPrompt) return;
     setPhase("uploading");
     const form = new FormData();
@@ -74,21 +98,35 @@ export default function ExercisePage() {
     form.append("prompt_id", currentPrompt.prompt_id);
     form.append("task_mode", currentPrompt.task_mode);
     form.append("prompt_type", currentPrompt.prompt_type);
+    form.append("mic_activated_at", meta.micActivatedAt);
+    if (meta.speechStartAt) {
+      form.append("speech_start_at", meta.speechStartAt);
+    }
     try {
-      const res = await api.upload<{ attempt_id: string }>(
+      const res = await api.upload<{ attempt_id: string; attempt_number: number }>(
         `/session/${sessionId}/attempt`,
         form
       );
+      setAttemptNumber(res.attempt_number);
       setPhase("scoring");
-      const pollInterval = setInterval(async () => {
+      pollIntervalRef.current = setInterval(async () => {
         const poll = await api.get<PollResult>(`/session/attempt/${res.attempt_id}`);
         if (poll.result && poll.result !== "pending" && poll.score) {
           setScore(poll.score);
           setPhase("scored");
-          clearInterval(pollInterval);
+          if (pollIntervalRef.current !== null) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
         }
       }, 3000);
-      setTimeout(() => clearInterval(pollInterval), 30000);
+      pollTimeoutRef.current = setTimeout(() => {
+        if (pollIntervalRef.current !== null) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+        setPhase((p) => (p === "scoring" ? "timeout" : p));
+      }, 45000);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Upload failed");
       setPhase("record");
@@ -100,6 +138,7 @@ export default function ExercisePage() {
       setPromptIdx((i) => i + 1);
       setPhase("instruction");
       setScore(null);
+      setAttemptNumber(null);
     } else {
       api.post(`/patient/tasks/${assignmentId}/complete`, {}).then(() => {
         window.location.href = "/patient/tasks";
@@ -115,9 +154,16 @@ export default function ExercisePage() {
     <div className="space-y-6 animate-fade-up max-w-2xl">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-black uppercase">Exercise</h1>
-        <span className="font-bold text-sm border-4 border-black px-3 py-1">
-          {promptIdx + 1} / {prompts.length}
-        </span>
+        <div className="flex items-center gap-3">
+          {attemptNumber ? (
+            <span className="font-bold text-sm border-4 border-black px-3 py-1">
+              Attempt {attemptNumber}
+            </span>
+          ) : null}
+          <span className="font-bold text-sm border-4 border-black px-3 py-1">
+            {promptIdx + 1} / {prompts.length}
+          </span>
+        </div>
       </div>
 
       {phase === "instruction" && (
@@ -138,6 +184,9 @@ export default function ExercisePage() {
 
       {phase === "record" && (
         <NeoCard className="space-y-4">
+          {currentPrompt.instruction && (
+            <p className="font-bold text-lg">{currentPrompt.instruction}</p>
+          )}
           {currentPrompt.display_content && (
             <div className="border-4 border-black bg-[#FFD93D] p-4 text-xl font-black">
               {currentPrompt.display_content}
@@ -147,16 +196,34 @@ export default function ExercisePage() {
         </NeoCard>
       )}
 
-      {phase === "uploading" && (
-        <NeoCard className="text-center py-8">
-          <p className="font-black text-lg animate-pulse">Uploading audio...</p>
+      {(phase === "uploading" || phase === "scoring") && (
+        <NeoCard className="space-y-4">
+          {currentPrompt.instruction && (
+            <p className="font-bold text-lg text-gray-500">{currentPrompt.instruction}</p>
+          )}
+          {currentPrompt.display_content && (
+            <div className="border-4 border-black bg-[#FFD93D] p-4 text-xl font-black opacity-60">
+              {currentPrompt.display_content}
+            </div>
+          )}
+          <div className="text-center py-4">
+            <p className="font-black text-lg animate-pulse">
+              {phase === "uploading" ? "Uploading audio..." : "Analysing speech..."}
+            </p>
+            {phase === "scoring" && (
+              <p className="text-sm font-medium text-gray-500 mt-2">This may take 10–30 seconds</p>
+            )}
+          </div>
         </NeoCard>
       )}
 
-      {phase === "scoring" && (
-        <NeoCard className="text-center py-8">
-          <p className="font-black text-lg animate-pulse">Analysing speech...</p>
-          <p className="text-sm font-medium text-gray-500 mt-2">This may take 10–30 seconds</p>
+      {phase === "timeout" && (
+        <NeoCard className="text-center py-8 space-y-4">
+          <p className="font-black text-lg">Analysis is taking longer than expected.</p>
+          <p className="text-sm font-medium text-gray-500">The result will appear here once ready.</p>
+          <NeoButton variant="ghost" onClick={() => setPhase("record")}>
+            Try again
+          </NeoButton>
         </NeoCard>
       )}
 

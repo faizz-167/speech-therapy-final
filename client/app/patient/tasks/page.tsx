@@ -7,15 +7,28 @@ import { NeoButton } from "@/components/ui/NeoButton";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
 import Link from "next/link";
 
+interface HomeSummary {
+  has_approved_plan: boolean;
+  plan_name: string | null;
+  plan_start_date: string | null;
+  plan_end_date: string | null;
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Assignment[]>([]);
+  const [homeSummary, setHomeSummary] = useState<HomeSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api
-      .get<Assignment[]>("/patient/tasks")
-      .then(setTasks)
+    Promise.all([
+      api.get<Assignment[]>("/patient/tasks"),
+      api.get<HomeSummary>("/patient/home").catch(() => null),
+    ])
+      .then(([taskList, summary]) => {
+        setTasks(taskList);
+        setHomeSummary(summary);
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
@@ -38,7 +51,12 @@ export default function TasksPage() {
 
       {tasks.length === 0 ? (
         <NeoCard>
-          <p className="font-bold">No tasks scheduled for today. Check back tomorrow!</p>
+          <p className="font-bold">No tasks scheduled for today.</p>
+          {homeSummary?.has_approved_plan && (
+            <p className="mt-2 text-sm font-medium text-gray-600">
+              Your current plan, {homeSummary.plan_name}, runs from {homeSummary.plan_start_date} to {homeSummary.plan_end_date}.
+            </p>
+          )}
         </NeoCard>
       ) : (
         <div className="space-y-4">

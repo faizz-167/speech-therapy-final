@@ -9,10 +9,27 @@ def _load_model():
     return whisper.load_model("small", device=device)
 
 
-def transcribe(audio_path: str) -> dict:
+def transcribe(audio_path: str, expected_text: str | None = None) -> dict:
     """Returns {transcript, words, duration, avg_confidence}"""
     model = _load_model()
-    result = model.transcribe(audio_path, word_timestamps=True, language="en")
+    initial_prompt = None
+    if expected_text:
+        # Truncate to 200 chars and strip newlines to prevent prompt injection via DB content.
+        safe_hint = expected_text[:200].replace("\n", " ").replace("\r", " ")
+        initial_prompt = f"Transcribe spoken English. Style hint: {safe_hint}"
+
+    result = model.transcribe(
+        audio_path,
+        task="transcribe",
+        language="en",
+        word_timestamps=True,
+        condition_on_previous_text=False,
+        temperature=0,
+        no_speech_threshold=0.6,
+        compression_ratio_threshold=2.0,
+        logprob_threshold=-1.0,
+        initial_prompt=initial_prompt,
+    )
     tokens = result.get("segments", [])
     all_words = []
     for seg in tokens:

@@ -6,42 +6,97 @@ import { NeoButton } from "@/components/ui/NeoButton";
 import { SkeletonList } from "@/components/ui/Skeletons";
 import Link from "next/link";
 
-interface HomeData { has_baseline: boolean; today_tasks: number; plan_status: string | null; }
+interface HomeData {
+  has_baseline: boolean;
+  full_name: string;
+  today_tasks: number;
+  has_approved_plan: boolean;
+  plan_status: string | null;
+  plan_name: string | null;
+  plan_start_date: string | null;
+  plan_end_date: string | null;
+}
 
 export default function PatientHomePage() {
   const [data, setData] = useState<HomeData | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      api.get("/baseline/result").catch(() => null),
-      api.get("/patient/tasks").catch(() => []),
-    ]).then(([baseline, tasks]) => {
-      setData({
-        has_baseline: !!baseline,
-        today_tasks: Array.isArray(tasks) ? tasks.length : 0,
-        plan_status: null,
+    api
+      .get<HomeData>("/patient/home")
+      .then(setData)
+      .catch(() => {
+        setData({
+          has_baseline: false,
+          full_name: "",
+          today_tasks: 0,
+          has_approved_plan: false,
+          plan_status: null,
+          plan_name: null,
+          plan_start_date: null,
+          plan_end_date: null,
+        });
       });
-    });
   }, []);
 
   if (!data) return <SkeletonList count={2} />;
 
   return (
-    <div className="space-y-6 animate-fade-up">
-      <h1 className="text-3xl font-black uppercase">Welcome Back</h1>
+    <div className="space-y-10 animate-fade-up max-w-4xl mx-auto p-4 md:p-8">
+      <div className="relative inline-block mb-6 mt-4">
+        <h1 className="text-5xl md:text-6xl font-black uppercase tracking-tighter relative z-10 text-white text-stroke-black drop-shadow-[4px_4px_0_rgba(0,0,0,1)]">
+          Welcome Back{data.full_name && `, ${data.full_name}`}
+        </h1>
+        <div className="absolute top-3 left-3 w-full h-full bg-neo-secondary border-4 border-neo-black z-0"></div>
+      </div>
+
       {!data.has_baseline && (
-        <NeoCard accent="accent" className="space-y-3">
-          <h2 className="font-black uppercase text-lg">Complete Your Baseline Assessment</h2>
-          <p className="font-medium">Your therapist needs your baseline scores before creating your therapy plan.</p>
-          <Link href="/patient/baseline"><NeoButton>Start Baseline</NeoButton></Link>
+        <NeoCard accent="accent" className="space-y-5 transform -rotate-1 relative z-10 hover:rotate-0 transition-transform p-8 border-8">
+          <div className="flex items-center gap-4 border-b-8 border-neo-black pb-6 mb-6">
+            <div className="min-w-16 w-16 h-16 bg-white border-4 border-neo-black flex items-center justify-center font-black text-4xl shadow-neo-sm shadow-neo-black">!</div>
+            <h2 className="font-black uppercase text-4xl tracking-tighter leading-none">Baseline<br/>Needed</h2>
+          </div>
+          <p className="font-bold text-2xl leading-snug">Your therapist needs your baseline scores before creating your therapy plan.</p>
+          <Link href="/patient/baseline" className="inline-block w-full pt-6">
+            <NeoButton size="lg" className="w-full text-2xl py-8 tracking-widest border-4">START BASELINE NOW</NeoButton>
+          </Link>
         </NeoCard>
       )}
-      {data.has_baseline && (
-        <NeoCard accent="secondary" className="space-y-3">
-          <h2 className="font-black uppercase text-lg">Today&apos;s Tasks</h2>
-          <p className="text-2xl font-black">{data.today_tasks} task(s)</p>
-          <Link href="/patient/tasks"><NeoButton>Go to Tasks</NeoButton></Link>
-        </NeoCard>
+
+      {data.has_baseline && !data.has_approved_plan && (
+        <div className="relative mt-12">
+          <div className="absolute -top-6 -right-6 w-24 h-24 bg-neo-warning border-4 border-neo-black rounded-none flex items-center justify-center rotate-[15deg] z-20 shadow-neo-sm">
+             <span className="font-black text-2xl text-center leading-none uppercase">Wait<br/>ing</span>
+          </div>
+          <NeoCard accent="muted" className="space-y-4 transform rotate-1 p-8 border-8">
+            <h2 className="font-black uppercase text-4xl tracking-tighter">Plan Pending</h2>
+            <p className="font-bold text-xl">Your baseline is complete. Your therapist has not approved a therapy plan yet.</p>
+          </NeoCard>
+        </div>
+      )}
+
+      {data.has_baseline && data.has_approved_plan && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-12">
+          <NeoCard accent="default" className="space-y-5 hover:-translate-y-2 transition-transform p-8 shadow-neo-lg">
+            <div className="inline-block bg-neo-black text-white px-3 py-1 font-black uppercase tracking-widest text-sm mb-2 -rotate-2">Current Plan</div>
+            <h2 className="font-black uppercase text-4xl tracking-tighter leading-none">{data.plan_name}</h2>
+            <div className="font-bold border-t-8 border-neo-black pt-5 mt-4 text-lg">
+              <span className="bg-neo-secondary px-2 border-2 border-neo-black inline-block mb-1">FROM</span> {data.plan_start_date} <br/>
+              <span className="bg-neo-secondary px-2 border-2 border-neo-black inline-block mt-3 mb-1">TO</span> {data.plan_end_date}
+            </div>
+            <div className="mt-6 inline-block px-4 py-2 bg-neo-accent border-4 border-neo-black font-black uppercase tracking-widest text-lg shadow-neo-sm">{data.plan_status}</div>
+          </NeoCard>
+          
+          <NeoCard accent="secondary" className="space-y-4 flex flex-col justify-between hover:translate-x-2 transition-transform p-8 shadow-neo-lg">
+            <div>
+               <div className="inline-block bg-neo-black text-white px-3 py-1 font-black uppercase tracking-widest text-sm mb-4 rotate-2">Action Required</div>
+               <h2 className="font-black uppercase text-4xl tracking-tighter">Today&apos;s Tasks</h2>
+               <div className="text-8xl font-black mt-6 drop-shadow-[6px_6px_0_rgba(0,0,0,1)] text-white text-stroke-black my-4">{data.today_tasks}</div>
+            </div>
+            <Link href="/patient/tasks" className="block w-full mt-8">
+              <NeoButton size="lg" className="w-full text-2xl py-8 border-4 border-neo-black transition-colors">GO TO TASKS ➔</NeoButton>
+            </Link>
+          </NeoCard>
+        </div>
       )}
     </div>
   );

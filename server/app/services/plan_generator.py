@@ -2,7 +2,7 @@ import uuid
 from datetime import date, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import String, cast, select
 
 from app.models.content import Task, TaskDefectMapping, TaskLevel
 from app.models.plan import TherapyPlan, PlanTaskAssignment
@@ -29,7 +29,7 @@ async def generate_weekly_plan(
     level_result = await db.execute(
         select(TaskLevel.task_id).where(
             TaskLevel.task_id.in_(task_ids),
-            TaskLevel.level_name == baseline_level,
+            cast(TaskLevel.level_name, String) == baseline_level,
         )
     )
     eligible_task_ids = [row[0] for row in level_result.fetchall()]
@@ -41,7 +41,7 @@ async def generate_weekly_plan(
         level_result = await db.execute(
             select(TaskLevel.task_id).where(
                 TaskLevel.task_id.in_(task_ids),
-                TaskLevel.level_name == "easy",
+                cast(TaskLevel.level_name, String) == "easy",
             )
         )
         eligible_task_ids = [row[0] for row in level_result.fetchall()]
@@ -64,7 +64,12 @@ async def generate_weekly_plan(
     db.add(plan)
     await db.flush()
 
-    slots = [(day, slot) for day in range(7) for slot in range(2)]
+    start_day_index = today.weekday()
+    slots = [
+        ((start_day_index + day_offset) % 7, slot)
+        for day_offset in range(7)
+        for slot in range(2)
+    ]
     for i, task in enumerate(tasks[:14]):
         day_index, priority = slots[i] if i < len(slots) else (i % 7, i // 7)
         assignment = PlanTaskAssignment(

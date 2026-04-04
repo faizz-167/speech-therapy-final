@@ -6,7 +6,13 @@ FILLER_WORDS = {"uh", "um", "er", "ah", "like", "you know", "sort of", "kind of"
 
 @lru_cache(maxsize=1)
 def _load_nlp():
-    return spacy.load("en_core_web_lg")
+    for model_name in ("en_core_web_lg", "en_core_web_sm"):
+        try:
+            return spacy.load(model_name)
+        except OSError:
+            continue
+    # Tokenization is enough for the current filler-word heuristic.
+    return spacy.blank("en")
 
 
 def score_disfluency(transcript: str, audio_duration: float = 0.0) -> dict:

@@ -1,9 +1,10 @@
 import asyncio
 import json
 import os
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
+from app.auth import decode_token
 from app.config import settings
 from app.routers import auth, therapist, plans, patient, baseline, session, progress
 
@@ -35,6 +36,24 @@ async def health():
 @app.websocket("/ws/{patient_id}")
 async def websocket_endpoint(websocket: WebSocket, patient_id: str):
     await websocket.accept()
+    # Expect {"type": "auth", "token": "<jwt>"} as the first message within 10 s.
+    try:
+        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+    except (asyncio.TimeoutError, Exception):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    token = auth_msg.get("token") if isinstance(auth_msg, dict) else None
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    try:
+        payload = decode_token(token)
+    except HTTPException:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    if payload.get("role") != "patient" or payload.get("sub") != patient_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     r = aioredis.from_url(settings.redis_url)
     pubsub = r.pubsub()
     await pubsub.subscribe(f"ws:patient:{patient_id}")

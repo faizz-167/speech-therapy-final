@@ -1,6 +1,6 @@
 @import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
 @import "@fontsource/space-grotesk/700.css";
-@import "@fontsource/space-grotesk/700.css"; /* 700 is max weight for Space Grotesk */
 @import "tailwindcss";
 
 @theme inline {
@@ -10,6 +10,26 @@
   --color-neo-muted: #C4B5FD;
   --color-neo-black: #000000;
   --font-sans: "Space Grotesk", sans-serif;
+}
+
+@utility shadow-neo-sm { box-shadow: 4px 4px 0px 0px #000; }
+@utility shadow-neo-md { box-shadow: 8px 8px 0px 0px #000; }
+@utility shadow-neo-lg { box-shadow: 12px 12px 0px 0px #000; }
+@utility shadow-neo-xl { box-shadow: 16px 16px 0px 0px #000; }
+
+@utility bg-pattern-halftone {
+  background-image: radial-gradient(#000 1.5px, transparent 1.5px);
+  background-size: 20px 20px;
+}
+@utility bg-pattern-grid {
+  background-image: linear-gradient(to right, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+@utility text-stroke-black {
+  -webkit-text-stroke: 2px black;
+  color: transparent;
 }
 
 body {

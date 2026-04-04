@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "SpeechPath", description: "Speech Th
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-[#FFFDF5]">{children}</body>
+      <body className="min-h-screen bg-neo-bg bg-pattern-grid text-neo-black">{children}</body>
     </html>
   );
 }

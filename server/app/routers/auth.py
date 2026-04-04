@@ -2,6 +2,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -10,10 +11,11 @@ from app.schemas.auth import TherapistRegister, PatientRegister, LoginRequest, T
 from app.models.users import Therapist, Patient, PatientStatus
 from app.auth import (
     hash_password, verify_password, generate_therapist_code,
-    create_access_token, require_therapist, require_patient,
+    create_access_token, decode_token,
 )
 
 router = APIRouter()
+bearer_scheme = HTTPBearer()
 
 
 @router.post("/register/therapist", response_model=TokenResponse)
@@ -102,10 +104,36 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(therapist: Annotated[Therapist, Depends(require_therapist)]):
-    return MeResponse(
-        user_id=str(therapist.therapist_id),
-        email=therapist.email,
-        full_name=therapist.full_name,
-        role="therapist",
-    )
+async def me(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
+    db: AsyncSession = Depends(get_db),
+):
+    payload = decode_token(credentials.credentials)
+    role = payload.get("role")
+    if role == "therapist":
+        result = await db.execute(
+            select(Therapist).where(Therapist.therapist_id == uuid.UUID(payload["sub"]))
+        )
+        therapist = result.scalar_one_or_none()
+        if not therapist:
+            raise HTTPException(404, "Therapist not found")
+        return MeResponse(
+            user_id=str(therapist.therapist_id),
+            email=therapist.email,
+            full_name=therapist.full_name,
+            role="therapist",
+        )
+    if role == "patient":
+        result = await db.execute(
+            select(Patient).where(Patient.patient_id == uuid.UUID(payload["sub"]))
+        )
+        patient = result.scalar_one_or_none()
+        if not patient:
+            raise HTTPException(404, "Patient not found")
+        return MeResponse(
+            user_id=str(patient.patient_id),
+            email=patient.email,
+            full_name=patient.full_name,
+            role="patient",
+        )
+    raise HTTPException(401, "Invalid token")

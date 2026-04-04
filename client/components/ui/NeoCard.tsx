@@ -9,21 +9,21 @@ interface NeoCardProps extends HTMLAttributes<HTMLDivElement> {
 export function NeoCard({ accent = "default", hover = false, className, children, ...props }: NeoCardProps) {
   const accents = {
     default: "bg-white",
-    muted: "bg-[#C4B5FD]",
-    accent: "bg-[#FF6B6B]",
-    secondary: "bg-[#FFD93D]",
+    muted: "bg-neo-muted",
+    accent: "bg-neo-accent",
+    secondary: "bg-neo-secondary",
   };
   return (
     <div
       className={cn(
-        "border-4 border-black shadow-[4px_4px_0px_0px_#000] p-4",
+        "border-4 border-neo-black shadow-neo-md p-6 rounded-none bg-pattern-halftone",
         accents[accent],
-        hover && "transition-transform hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#000] cursor-pointer",
+        hover && "transition-all duration-200 ease-out hover:-translate-y-[4px] hover:-translate-x-[4px] hover:shadow-neo-lg cursor-pointer",
         className
       )}
       {...props}
     >
-      {children}
+      <div className="bg-white border-4 border-neo-black p-4 h-full shadow-neo-sm">{children}</div>
     </div>
   );
 }

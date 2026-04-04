@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(psql:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(cp \"D:\\\\Developer\\\\sppech-therapy-final/client/.env.local\" /tmp/env_local_backup.txt)",
+      "Read(//tmp/**)",
+      "Bash(npx create-next-app@latest client-temp --typescript --tailwind --app --no-src-dir --no-eslint --import-alias \"@/*\" --yes)",
+      "Bash(cp:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)",
+      "Bash(git diff:*)"
+    ]
+  }
+}

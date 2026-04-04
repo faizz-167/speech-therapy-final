@@ -64,6 +64,7 @@ export interface Prompt {
 
 export interface AttemptScore {
   attempt_id: string;
+  attempt_number: number | null;
   word_accuracy: number | null;
   phoneme_accuracy: number | null;
   fluency_score: number | null;
@@ -76,9 +77,12 @@ export interface AttemptScore {
   dominant_emotion: string | null;
   engagement_score: number | null;
   speech_score: number | null;
+  confidence_score: number | null;
   final_score: number | null;
   pass_fail: string | null;
   adaptive_decision: string | null;
   asr_transcript: string | null;
   performance_level: string | null;
+  review_recommended: boolean | null;
+  fail_reason: string | null;
 }

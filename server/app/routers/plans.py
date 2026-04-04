@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.auth import require_therapist
@@ -20,9 +21,15 @@ router = APIRouter()
 
 
 async def _plan_to_out(plan: TherapyPlan, db: AsyncSession) -> PlanOut:
+    task_ids = [a.task_id for a in plan.assignments]
+    tasks_by_id: dict[str, Task] = {}
+    if task_ids:
+        task_result = await db.execute(select(Task).where(Task.task_id.in_(task_ids)))
+        tasks_by_id = {task.task_id: task for task in task_result.scalars().all()}
+
     assignments = []
     for a in plan.assignments:
-        task = await db.get(Task, a.task_id)
+        task = tasks_by_id.get(a.task_id)
         assignments.append(AssignmentOut(
             assignment_id=str(a.assignment_id),
             task_id=a.task_id,
@@ -43,6 +50,11 @@ async def _plan_to_out(plan: TherapyPlan, db: AsyncSession) -> PlanOut:
     )
 
 
+async def _get_plan_with_assignments(stmt, db: AsyncSession) -> TherapyPlan | None:
+    result = await db.execute(stmt.options(selectinload(TherapyPlan.assignments)))
+    return result.scalar_one_or_none()
+
+
 @router.post("/generate", response_model=PlanOut)
 async def generate_plan(
     body: GeneratePlanRequest,
@@ -58,10 +70,16 @@ async def generate_plan(
     patient = result.scalar_one_or_none()
     if not patient:
         raise HTTPException(404, "Patient not found")
-    plan = await generate_weekly_plan(patient, therapist, body.baseline_level, db)
-    await db.refresh(plan)
-    result = await db.execute(select(TherapyPlan).where(TherapyPlan.plan_id == plan.plan_id))
-    plan = result.scalar_one()
+    try:
+        plan = await generate_weekly_plan(patient, therapist, body.baseline_level, db)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    plan = await _get_plan_with_assignments(
+        select(TherapyPlan).where(TherapyPlan.plan_id == plan.plan_id),
+        db,
+    )
+    if not plan:
+        raise HTTPException(404, "Plan not found after creation")
     return await _plan_to_out(plan, db)
 
 
@@ -71,13 +89,14 @@ async def get_patient_plan(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
+    plan = await _get_plan_with_assignments(
         select(TherapyPlan).where(
             TherapyPlan.patient_id == patient_id,
             TherapyPlan.therapist_id == therapist.therapist_id,
         ).order_by(TherapyPlan.created_at.desc())
+        .limit(1),
+        db,
     )
-    plan = result.scalar_one_or_none()
     if not plan:
         return None
     return await _plan_to_out(plan, db)
@@ -89,13 +108,13 @@ async def get_plan(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
+    plan = await _get_plan_with_assignments(
         select(TherapyPlan).where(
             TherapyPlan.plan_id == plan_id,
             TherapyPlan.therapist_id == therapist.therapist_id,
-        )
+        ),
+        db,
     )
-    plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(404, "Plan not found")
     return await _plan_to_out(plan, db)
@@ -150,8 +169,20 @@ async def update_assignment(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
+    plan_result = await db.execute(
+        select(TherapyPlan).where(
+            TherapyPlan.plan_id == plan_id,
+            TherapyPlan.therapist_id == therapist.therapist_id,
+        )
+    )
+    plan = plan_result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
     result = await db.execute(
-        select(PlanTaskAssignment).where(PlanTaskAssignment.assignment_id == assignment_id)
+        select(PlanTaskAssignment).where(
+            PlanTaskAssignment.assignment_id == assignment_id,
+            PlanTaskAssignment.plan_id == plan.plan_id,
+        )
     )
     assignment = result.scalar_one_or_none()
     if not assignment:
@@ -180,8 +211,20 @@ async def delete_assignment(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
+    plan_result = await db.execute(
+        select(TherapyPlan).where(
+            TherapyPlan.plan_id == plan_id,
+            TherapyPlan.therapist_id == therapist.therapist_id,
+        )
+    )
+    plan = plan_result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
     result = await db.execute(
-        select(PlanTaskAssignment).where(PlanTaskAssignment.assignment_id == assignment_id)
+        select(PlanTaskAssignment).where(
+            PlanTaskAssignment.assignment_id == assignment_id,
+            PlanTaskAssignment.plan_id == plan.plan_id,
+        )
     )
     assignment = result.scalar_one_or_none()
     if not assignment:
@@ -217,7 +260,12 @@ async def tasks_for_defects(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    plan_result = await db.execute(select(TherapyPlan).where(TherapyPlan.plan_id == plan_id))
+    plan_result = await db.execute(
+        select(TherapyPlan).where(
+            TherapyPlan.plan_id == plan_id,
+            TherapyPlan.therapist_id == therapist.therapist_id,
+        )
+    )
     plan = plan_result.scalar_one_or_none()
     if not plan:
         raise HTTPException(404, "Plan not found")
