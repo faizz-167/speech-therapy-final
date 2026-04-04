@@ -1,5 +1,4 @@
-import random
-import string
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -28,7 +27,8 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def generate_therapist_code(length: int = 8) -> str:
-    return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def create_access_token(data: dict) -> str:
