@@ -26,6 +26,8 @@ class ScoringWeights:
     rule_high_eng_boost: float = 5.0
     rule_severe_pa_threshold: float = 35.0
     rule_severe_pa_score_cap: float = 45.0
+    rule_low_conf_threshold: float = 0.50   # Whisper ASR quality gate
+    adaptive_stay_max: float = 74.0         # Stay range ceiling
 
 
 def weights_from_db_row(row) -> "ScoringWeights":
@@ -53,6 +55,8 @@ def weights_from_db_row(row) -> "ScoringWeights":
         rule_high_eng_boost=float(row.rule_high_eng_boost),
         rule_severe_pa_threshold=float(row.rule_severe_pa_threshold),
         rule_severe_pa_score_cap=float(row.rule_severe_pa_score_cap),
+        rule_low_conf_threshold=float(row.rule_low_conf_threshold) if row.rule_low_conf_threshold is not None else 0.50,
+        adaptive_stay_max=float(row.adaptive_stay_max) if row.adaptive_stay_max is not None else 74.0,
     )
 
 

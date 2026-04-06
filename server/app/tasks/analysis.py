@@ -338,7 +338,7 @@ def analyze_attempt(self, attempt_id):
         adaptive_decision = scores["adaptive_decision"]
         pass_fail = scores["pass_fail"]
         performance_level = scores["performance_level"]
-        low_confidence = avg_confidence < 0.5
+        low_confidence = avg_confidence < weights.rule_low_conf_threshold
         review_recommended = _needs_asr_review(transcript, target_text, avg_confidence, wa)
         fail_reason = None
         if review_recommended:
