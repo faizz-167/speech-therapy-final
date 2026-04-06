@@ -205,15 +205,13 @@ def analyze_attempt(self, attempt_id):
             "SELECT spa.attempt_id, spa.attempt_number, spa.session_id, spa.prompt_id, spa.audio_file_path,"
             " spa.mic_activated_at, spa.speech_start_at, spa.task_mode, spa.prompt_type,"
             " p.display_content, p.target_response, p.level_id,"
-            " ps.target_word_count, ps.target_duration_sec, ps.aq_relevance_threshold,"
-            " st.raw_speech_target,"
+            " p.target_word_count, p.target_duration_sec, p.aq_relevance_threshold,"
+            " p.speech_target,"
             " tl.task_id,"
             " s.patient_id, s.plan_id"
             " FROM session_prompt_attempt spa"
             " JOIN session s ON s.session_id = spa.session_id"
             " JOIN prompt p ON p.prompt_id = spa.prompt_id"
-            " LEFT JOIN prompt_scoring ps ON ps.prompt_id = spa.prompt_id"
-            " LEFT JOIN speech_target st ON st.prompt_id = spa.prompt_id"
             " LEFT JOIN task_level tl ON tl.level_id = p.level_id"
             " WHERE spa.attempt_id = %s",
             (attempt_id,),
@@ -227,7 +225,7 @@ def analyze_attempt(self, attempt_id):
             mic_at, speech_at, task_mode, prompt_type,
             display_content, target_response, level_id,
             target_word_count, target_duration_sec, aq_threshold,
-            raw_speech_target, task_id, patient_id, plan_id,
+            speech_target, task_id, patient_id, plan_id,
         ) = row
 
         if not audio_path or not os.path.exists(audio_path):
@@ -265,8 +263,8 @@ def analyze_attempt(self, attempt_id):
         conn = None
 
         target_text = target_response
-        if not target_text and raw_speech_target and isinstance(raw_speech_target, dict):
-            target_text = raw_speech_target.get("text")
+        if not target_text and speech_target and isinstance(speech_target, dict):
+            target_text = speech_target.get("text")
 
         asr = transcribe(audio_path, expected_text=target_text)
         transcript = asr["transcript"]
