@@ -99,3 +99,22 @@ class BaselineItemResult(Base):
     score_given: Mapped[int | None] = mapped_column(Integer)
     error_noted: Mapped[str | None] = mapped_column(Text)
     clinician_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class BaselineAttempt(Base):
+    """Tracks one audio recording attempt for a single baseline_item within a baseline session."""
+    __tablename__ = "baseline_attempt"
+
+    attempt_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"))
+    item_id: Mapped[str] = mapped_column(String, ForeignKey("baseline_item.item_id"))
+    audio_file_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    result: Mapped[str] = mapped_column(String, default="pending")  # pending | scored | failed
+    ml_phoneme_accuracy: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    ml_word_accuracy: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    ml_fluency_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    ml_speech_rate_wpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ml_confidence: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    asr_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    computed_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))

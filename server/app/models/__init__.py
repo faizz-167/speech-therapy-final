@@ -6,7 +6,7 @@ from app.models.content import (
 )
 from app.models.baseline import (
     BaselineAssessment, BaselineDefectMapping, BaselineSection,
-    BaselineItem, PatientBaselineResult, BaselineItemResult,
+    BaselineItem, PatientBaselineResult, BaselineItemResult, BaselineAttempt,
 )
 from app.models.plan import TherapyPlan, PlanTaskAssignment, PlanRevisionHistory
 from app.models.scoring import (
