@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
 
 interface BaselineItem {
   item_id: string;
@@ -13,266 +12,244 @@ interface BaselineItem {
   expected_output: string | null;
   response_type: string | null;
 }
-interface BaselineSection { section_id: string; section_name: string; instructions: string | null; items: BaselineItem[]; }
-interface BaselineAssessment { baseline_id: string; name: string; domain: string; sections: BaselineSection[]; }
-
-type ItemPhase = "prompt" | "recording" | "recorded" | "rated";
-
-// Emoji map for common speech therapy picture naming items
-const EMOJI_MAP: Record<string, string> = {
-  apple: "🍎", ball: "⚽", cat: "🐱", dog: "🐶", house: "🏠",
-  tree: "🌳", car: "🚗", fish: "🐟", bird: "🐦", flower: "🌸",
-  book: "📚", cup: "☕", key: "🔑", sun: "☀️", moon: "🌙",
-  star: "⭐", heart: "❤️", hand: "✋", eye: "👁️", nose: "👃",
-  shoe: "👟", hat: "🎩", chair: "🪑", bed: "🛏️", door: "🚪",
-  pen: "✏️", milk: "🥛", egg: "🥚", bread: "🍞", cake: "🎂",
-  water: "💧", fire: "🔥", cloud: "☁️", rain: "🌧️", snow: "❄️",
-  baby: "👶", boy: "👦", girl: "👧", man: "👨", woman: "👩",
-  horse: "🐎", cow: "🐄", pig: "🐷", duck: "🦆", frog: "🐸",
-  elephant: "🐘", lion: "🦁", bear: "🐻", rabbit: "🐰",
-  bus: "🚌", train: "🚂", plane: "✈️", boat: "⛵", bike: "🚲",
-  phone: "📱", lamp: "💡", clock: "⏰", bowl: "🥣", fork: "🍴",
-  spoon: "🥄", bag: "👜", kite: "🪁", leaf: "🍃", ring: "💍",
-  drum: "🥁", flag: "🚩", rope: "🪢", sock: "🧦", coat: "🧥",
-  banana: "🍌", orange: "🍊", grape: "🍇", lemon: "🍋", pear: "🍐",
-  tomato: "🍅", corn: "🌽", carrot: "🥕", potato: "🥔", cake2: "🧁",
-};
-
-function getPictureEmoji(word: string | null): string {
-  if (!word) return "🖼️";
-  const key = word.trim().toLowerCase().split(" ")[0];
-  return EMOJI_MAP[key] ?? "🖼️";
+interface BaselineSection {
+  section_id: string;
+  section_name: string;
+  instructions: string | null;
+  items: BaselineItem[];
+}
+interface BaselineAssessment {
+  baseline_id: string;
+  name: string;
+  domain: string;
+  sections: BaselineSection[];
+}
+interface AttemptResult {
+  attempt_id: string;
+  result: string;
+  computed_score: number | null;
+  phoneme_accuracy: number | null;
+  asr_transcript: string | null;
 }
 
-function isPictureNaming(item: BaselineItem): boolean {
-  if (item.response_type?.toLowerCase().includes("picture")) return true;
-  if (item.task_name?.toLowerCase().includes("picture")) return true;
-  if (item.task_name?.toLowerCase().includes("naming")) return true;
-  return false;
-}
+type Phase = "loading" | "ready" | "recording" | "uploading" | "polling" | "scored" | "complete" | "error";
 
 export default function BaselinePage() {
   const [assessments, setAssessments] = useState<BaselineAssessment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [currentItemIdx, setCurrentItemIdx] = useState(0);
-  const [scores, setScores] = useState<Record<string, number>>({});
-  const [submitted, setSubmitted] = useState(false);
-  const [result, setResult] = useState<{ raw_score: number; level: string } | null>(null);
-
-  // Per-item recording state
-  const [phase, setPhase] = useState<ItemPhase>("prompt");
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [allItems, setAllItems] = useState<BaselineItem[]>([]);
+  const [itemIndex, setItemIndex] = useState(0);
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [attemptResult, setAttemptResult] = useState<AttemptResult | null>(null);
+  const [completedScores, setCompletedScores] = useState<AttemptResult[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
-  const allItems = assessments.flatMap(a =>
-    a.sections.flatMap(s => s.items.map(i => ({ ...i, baseline_id: a.baseline_id, assessment_name: a.name })))
-  );
-  const currentItem = allItems[currentItemIdx];
-  const isLast = currentItemIdx === allItems.length - 1;
-
+  // Load exercises and start baseline session
   useEffect(() => {
-    api.get<BaselineAssessment[]>("/baseline/exercises")
-      .then(setAssessments)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load"))
-      .finally(() => setLoading(false));
+    (async () => {
+      try {
+        const exercises = await api.get<BaselineAssessment[]>("/baseline/exercises");
+        setAssessments(exercises);
+        const flat: BaselineItem[] = exercises.flatMap((a) =>
+          a.sections.flatMap((s) => s.items)
+        );
+        setAllItems(flat);
+
+        const { session_id } = await api.post<{ session_id: string }>("/baseline/start", {});
+        setSessionId(session_id);
+        setPhase("ready");
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to load baseline exercises");
+        setPhase("error");
+      }
+    })();
   }, []);
 
-  // Reset recording state when moving to a new item
-  useEffect(() => {
-    if (blobUrl) URL.revokeObjectURL(blobUrl);
-    setBlobUrl(null);
-    setPhase("prompt");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentItemIdx]);
+  const currentItem = allItems[itemIndex] ?? null;
 
-  async function startRecording() {
+  const startRecording = async () => {
     try {
+      chunksRef.current = [];
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream);
-      chunksRef.current = [];
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const url = URL.createObjectURL(blob);
-        setBlobUrl(url);
-        setPhase("recorded");
-        stream.getTracks().forEach(t => t.stop());
-      };
       mr.start();
       mediaRef.current = mr;
       setPhase("recording");
     } catch {
-      setError("Microphone access denied. Please allow microphone and reload.");
+      setError("Microphone access denied.");
+      setPhase("error");
     }
-  }
+  };
 
-  function stopRecording() {
-    mediaRef.current?.stop();
-  }
+  const stopAndUpload = async () => {
+    if (!mediaRef.current || !sessionId || !currentItem) return;
+    setPhase("uploading");
 
-  function handleRetry() {
-    if (blobUrl) URL.revokeObjectURL(blobUrl);
-    setBlobUrl(null);
-    setPhase("prompt");
-  }
+    await new Promise<void>((resolve) => {
+      mediaRef.current!.onstop = () => resolve();
+      mediaRef.current!.stop();
+      mediaRef.current!.stream.getTracks().forEach((t) => t.stop());
+    });
 
-  function handleScore(score: number) {
-    if (!currentItem) return;
-    setScores(prev => ({ ...prev, [currentItem.item_id]: score }));
-    setPhase("rated");
-  }
-
-  function handleNext() {
-    if (!isLast) {
-      setCurrentItemIdx(i => i + 1);
-    }
-  }
-
-  async function handleSubmit() {
-    const firstAssessment = assessments[0];
-    if (!firstAssessment) return;
     try {
-      const item_scores = Object.entries(scores).map(([item_id, score]) => ({ item_id, score }));
-      const res = await api.post<{ raw_score: number; level: string }>("/baseline/submit", {
-        baseline_id: firstAssessment.baseline_id,
-        item_scores,
-      });
-      setResult(res);
-      setSubmitted(true);
+      const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+      const form = new FormData();
+      form.append("audio", blob, "attempt.webm");
+      form.append("item_id", currentItem.item_id);
+
+      const { attempt_id } = await api.upload<{ attempt_id: string }>(
+        `/baseline/${sessionId}/attempt`,
+        form
+      );
+      setPhase("polling");
+      await pollResult(attempt_id);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Submit failed");
+      setError(e instanceof Error ? e.message : "Upload failed");
+      setPhase("error");
     }
+  };
+
+  const pollResult = async (attemptId: string) => {
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const res = await api.get<AttemptResult>(`/baseline/attempt/${attemptId}`);
+        if (res.result === "scored" || res.result === "failed") {
+          setAttemptResult(res);
+          setPhase("scored");
+          return;
+        }
+      } catch {
+        // keep polling
+      }
+    }
+    setError("Scoring timed out. Please try again.");
+    setPhase("error");
+  };
+
+  const nextItem = () => {
+    if (attemptResult) {
+      setCompletedScores((prev) => [...prev, attemptResult]);
+    }
+    setAttemptResult(null);
+    if (itemIndex + 1 >= allItems.length) {
+      completeSession();
+    } else {
+      setItemIndex((i) => i + 1);
+      setPhase("ready");
+    }
+  };
+
+  const completeSession = async () => {
+    if (!sessionId) return;
+    setPhase("uploading");
+    try {
+      await api.post(`/baseline/${sessionId}/complete`, {});
+      setPhase("complete");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to complete session");
+      setPhase("error");
+    }
+  };
+
+  if (phase === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-lg font-medium">Loading baseline exercises…</p>
+      </div>
+    );
   }
 
-  if (loading) return <SkeletonList />;
-  if (error) return <ErrorBanner message={error} />;
-  if (submitted && result) return (
-    <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-8 animate-pop-in">
-      <h1 className="text-4xl font-black uppercase tracking-widest px-4 text-center">BASELINE ASSESSMENT</h1>
-      
-      <div className="bg-neo-warning border-4 sm:border-8 border-neo-black p-8 sm:p-12 max-w-3xl w-full text-center shadow-neo-lg relative">
-        <div className="text-6xl mb-6">🎉</div>
-        <h2 className="text-3xl sm:text-4xl font-black uppercase tracking-tight mb-8">GREAT WORK!</h2>
-        
-        <p className="font-bold text-lg sm:text-xl mb-4 leading-relaxed">
-           You&apos;ve completed your baseline assessment — that took real effort and courage.
-        </p>
-        <p className="font-bold text-lg sm:text-xl mb-12 leading-relaxed">
-           Your therapist will review your results and craft a personalised therapy plan just for you. You&apos;ll be notified once it&apos;s ready to begin.
-        </p>
-        
-        <div className="inline-block relative hover:scale-105 transition-transform duration-100 ease-linear">
-           <a href="/patient/home">
-             <NeoButton size="lg" className="px-12 py-6 text-xl tracking-widest border-4 bg-neo-accent hover:bg-neo-accent border-neo-black shadow-neo-md text-neo-black hover:text-white transition-colors">
-               BACK TO HOME
-             </NeoButton>
-           </a>
-        </div>
+  if (phase === "error") {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <NeoCard className="p-6 max-w-md w-full">
+          <p className="text-red-600 font-semibold mb-4">{error}</p>
+          <NeoButton onClick={() => window.location.reload()}>Try Again</NeoButton>
+        </NeoCard>
       </div>
-    </div>
-  );
+    );
+  }
 
-  if (!currentItem) return <ErrorBanner message="No baseline exercises found for your assigned defects." />;
-
-  const pictureTask = isPictureNaming(currentItem);
-  const scored = scores[currentItem.item_id] !== undefined;
-  const canSubmit = isLast && scored;
+  if (phase === "complete") {
+    const avg = completedScores.length
+      ? Math.round(completedScores.reduce((s, a) => s + (a.computed_score ?? 0), 0) / completedScores.length)
+      : 0;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <NeoCard className="p-8 max-w-md w-full text-center">
+          <h2 className="text-2xl font-bold mb-2">Baseline Complete!</h2>
+          <p className="text-gray-600 mb-4">Average score: <strong>{avg}</strong></p>
+          <NeoButton onClick={() => (window.location.href = "/patient/dashboard")}>
+            Go to Dashboard
+          </NeoButton>
+        </NeoCard>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 animate-fade-up max-w-2xl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-black uppercase">Baseline Assessment</h1>
-        <span className="font-bold text-sm border-4 border-black px-3 py-1">
-          {currentItemIdx + 1} / {allItems.length}
-        </span>
-      </div>
-      <div className="w-full bg-gray-200 border-2 border-black h-3">
-        <div className="bg-[#FF6B6B] h-full transition-all" style={{ width: `${(currentItemIdx / allItems.length) * 100}%` }} />
-      </div>
+    <div className="min-h-screen p-6">
+      <h1 className="text-2xl font-bold mb-6">Baseline Assessment</h1>
+      <p className="text-sm text-gray-500 mb-6">
+        Item {itemIndex + 1} of {allItems.length}
+      </p>
 
-      {/* Prompt card */}
-      <NeoCard className="space-y-4">
-        {currentItem.task_name && (
-          <p className="font-black uppercase text-sm text-gray-500">{currentItem.task_name}</p>
-        )}
-        {currentItem.instruction && (
-          <p className="font-bold">{currentItem.instruction}</p>
-        )}
-        {pictureTask && currentItem.display_content ? (
-          <div className="border-4 border-black bg-[#FFD93D] p-8 text-center rounded">
-            <div className="text-9xl leading-none select-none" role="img" aria-label="picture to name">
-              {getPictureEmoji(currentItem.display_content)}
+      {currentItem && (
+        <NeoCard className="p-6 max-w-2xl mx-auto">
+          <h2 className="text-xl font-semibold mb-2">{currentItem.task_name ?? "Exercise"}</h2>
+          {currentItem.instruction && (
+            <p className="text-gray-600 mb-3">{currentItem.instruction}</p>
+          )}
+          {currentItem.display_content && (
+            <div className="bg-gray-50 rounded-lg p-4 mb-4 text-center text-lg font-medium">
+              {currentItem.display_content}
             </div>
-            <p className="sr-only">{currentItem.display_content}</p>
-          </div>
-        ) : currentItem.display_content ? (
-          <div className="border-4 border-black bg-[#FFD93D] p-4 text-xl font-black">
-            {currentItem.display_content}
-          </div>
-        ) : null}
-      </NeoCard>
+          )}
 
-      {/* Recording card */}
-      <NeoCard accent="muted" className="space-y-4">
-        <p className="font-black uppercase text-sm">Record your response:</p>
-
-        {phase === "prompt" && (
-          <NeoButton onClick={startRecording} className="w-full">
-            🎙 Start Recording
-          </NeoButton>
-        )}
-
-        {phase === "recording" && (
-          <div className="space-y-3 text-center">
-            <div className="text-[#FF6B6B] font-black animate-pulse text-lg">● RECORDING — speak now</div>
-            <NeoButton variant="ghost" onClick={stopRecording} className="w-full">
-              ■ Stop Recording
+          {phase === "ready" && (
+            <NeoButton onClick={startRecording} className="w-full">
+              Start Recording
             </NeoButton>
-          </div>
-        )}
+          )}
 
-        {(phase === "recorded" || phase === "rated") && (
-          <div className="space-y-3">
-            <p className="text-sm font-bold text-green-700">Recording complete ✓</p>
-            {blobUrl && (
-              <audio controls src={blobUrl} className="w-full border-2 border-black" />
-            )}
-            <NeoButton variant="ghost" onClick={handleRetry} size="sm">
-              ↺ Retry
-            </NeoButton>
-          </div>
-        )}
-
-        {/* Self-rating — visible only after recording */}
-        {(phase === "recorded" || phase === "rated") && (
-          <div className="space-y-2 border-t-4 border-black pt-3">
-            <p className="font-black uppercase text-sm">Rate your performance:</p>
-            <div className="grid grid-cols-5 gap-2">
-              {[20, 40, 60, 80, 100].map(score => (
-                <NeoButton
-                  key={score}
-                  variant={scores[currentItem.item_id] === score ? "primary" : "ghost"}
-                  onClick={() => handleScore(score)}
-                  size="md"
-                >
-                  {score}
-                </NeoButton>
-              ))}
+          {phase === "recording" && (
+            <div className="text-center">
+              <div className="w-4 h-4 bg-red-500 rounded-full animate-pulse mx-auto mb-3" />
+              <p className="text-sm text-gray-600 mb-4">Recording… speak now</p>
+              <NeoButton onClick={stopAndUpload} className="w-full">
+                Stop &amp; Submit
+              </NeoButton>
             </div>
-            <p className="text-xs font-medium text-gray-500">20=Poor · 40=Below Avg · 60=Average · 80=Good · 100=Excellent</p>
-          </div>
-        )}
-      </NeoCard>
+          )}
 
-      {/* Navigation */}
-      {phase === "rated" && (
-        canSubmit ? (
-          <NeoButton className="w-full" onClick={handleSubmit}>Submit Baseline</NeoButton>
-        ) : (
-          <NeoButton className="w-full" onClick={handleNext}>Next →</NeoButton>
-        )
+          {(phase === "uploading" || phase === "polling") && (
+            <div className="text-center py-6">
+              <p className="text-gray-600">
+                {phase === "uploading" ? "Uploading…" : "Analyzing your speech…"}
+              </p>
+            </div>
+          )}
+
+          {phase === "scored" && attemptResult && (
+            <div className="text-center">
+              <p className="text-lg font-semibold mb-1">
+                Score: {attemptResult.computed_score != null ? Math.round(attemptResult.computed_score) : "—"}
+              </p>
+              {attemptResult.asr_transcript && (
+                <p className="text-sm text-gray-500 mb-4">
+                  Heard: &ldquo;{attemptResult.asr_transcript}&rdquo;
+                </p>
+              )}
+              <NeoButton onClick={nextItem} className="w-full">
+                {itemIndex + 1 >= allItems.length ? "Finish" : "Next Item"}
+              </NeoButton>
+            </div>
+          )}
+        </NeoCard>
       )}
     </div>
   );
