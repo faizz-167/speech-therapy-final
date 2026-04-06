@@ -313,6 +313,24 @@ def _upsert_session_emotion_summary(cur, session_id: str, patient_id: str) -> No
         )
 
 
+def _create_review_notification(cur, therapist_id: str, patient_id: str, attempt_id: str) -> None:
+    """Create a therapist_notification row when an attempt needs manual review."""
+    import uuid as _uuid
+    cur.execute(
+        "INSERT INTO therapist_notification"
+        " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+        " VALUES (%s,%s,%s,%s,%s,%s,false,NOW())",
+        (
+            str(_uuid.uuid4()),
+            therapist_id,
+            "review_flagged",
+            patient_id,
+            attempt_id,
+            "An attempt has been flagged for review due to low ASR confidence.",
+        ),
+    )
+
+
 @celery_app.task(name="app.tasks.analysis.analyze_attempt", bind=True, max_retries=2)
 def analyze_attempt(self, attempt_id):
     # Lazy ML imports — only loaded when the worker actually runs the task
@@ -396,6 +414,13 @@ def analyze_attempt(self, attempt_id):
             defect_json, patient_dob = patient_row
             if defect_json and isinstance(defect_json, dict):
                 patient_defect_ids = defect_json.get("defect_ids", [])
+
+        cur.execute(
+            "SELECT assigned_therapist_id FROM patient WHERE patient_id = %s",
+            (patient_id,),
+        )
+        therapist_row = cur.fetchone()
+        assigned_therapist_id = str(therapist_row[0]) if therapist_row and therapist_row[0] else None
 
         # Per-defect PA thresholds — pick the strictest (lowest) min_pa_to_pass
         defect_pa_min: float | None = None
@@ -571,6 +596,8 @@ def analyze_attempt(self, attempt_id):
             level_id, adaptive_decision, final_score, pass_fail,
         )
         _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
+        if review_recommended and assigned_therapist_id:
+            _create_review_notification(cur, assigned_therapist_id, str(patient_id), str(attempt_id))
         conn.commit()
 
         r = redis.from_url(settings.redis_url)

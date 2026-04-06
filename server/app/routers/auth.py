@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.schemas.auth import TherapistRegister, PatientRegister, LoginRequest, TokenResponse, MeResponse
 from app.models.users import Therapist, Patient, PatientStatus
+from app.models.operations import TherapistNotification
 from app.auth import (
     hash_password, verify_password, generate_therapist_code,
     create_access_token, decode_token,
@@ -65,6 +66,14 @@ async def register_patient(body: PatientRegister, db: AsyncSession = Depends(get
         status=PatientStatus.pending,
     )
     db.add(patient)
+    await db.commit()
+    notification = TherapistNotification(
+        therapist_id=therapist.therapist_id,
+        type="patient_registered",
+        patient_id=patient.patient_id,
+        message=f"New patient {patient.full_name} registered and is awaiting your approval.",
+    )
+    db.add(notification)
     await db.commit()
     await db.refresh(patient)
     token = create_access_token({"sub": str(patient.patient_id), "role": "patient"})
