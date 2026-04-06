@@ -188,6 +188,83 @@ def _is_no_speech(transcript: str, duration: float, avg_confidence: float) -> bo
     return word_count <= 1 and duration < 1.0 and avg_confidence < 0.35
 
 
+def _upsert_patient_task_progress(
+    cur,
+    patient_id: str,
+    task_id: str,
+    current_level_id: str | None,
+    adaptive_decision: str,
+    final_score: float,
+    pass_fail: str,
+) -> None:
+    """Upsert patient_task_progress for adaptive difficulty tracking."""
+    if not task_id:
+        return
+
+    # Load all levels for this task ordered by difficulty ascending
+    cur.execute(
+        "SELECT level_id FROM task_level WHERE task_id = %s ORDER BY difficulty_score ASC",
+        (task_id,),
+    )
+    level_rows = cur.fetchall()
+    ordered_levels = [r[0] for r in level_rows]
+    if not ordered_levels:
+        return
+
+    # Get or create the progress row
+    cur.execute(
+        "SELECT progress_id, current_level_id, consecutive_passes, consecutive_fails,"
+        " overall_accuracy, total_attempts"
+        " FROM patient_task_progress"
+        " WHERE patient_id = %s AND task_id = %s",
+        (patient_id, task_id),
+    )
+    prog = cur.fetchone()
+
+    is_pass = pass_fail == "pass"
+    new_level_id = current_level_id or (ordered_levels[0] if ordered_levels else None)
+
+    if prog:
+        progress_id, cur_level, cons_pass, cons_fail, overall_acc, total_att = prog
+        new_cons_pass = (cons_pass or 0) + 1 if is_pass else 0
+        new_cons_fail = (cons_fail or 0) + 1 if not is_pass else 0
+        new_total = (total_att or 0) + 1
+        prev_acc = float(overall_acc) if overall_acc is not None else final_score
+        new_acc = round(((prev_acc * (total_att or 0)) + final_score) / new_total, 2)
+
+        effective_level = cur_level or new_level_id
+        try:
+            idx = ordered_levels.index(effective_level)
+        except ValueError:
+            idx = 0
+        if adaptive_decision == "advance":
+            idx = min(idx + 1, len(ordered_levels) - 1)
+        elif adaptive_decision == "drop":
+            idx = max(idx - 1, 0)
+        new_level_id = ordered_levels[idx]
+
+        cur.execute(
+            "UPDATE patient_task_progress"
+            " SET current_level_id=%s, consecutive_passes=%s, consecutive_fails=%s,"
+            " overall_accuracy=%s, last_final_score=%s, total_attempts=%s, last_attempted_at=NOW()"
+            " WHERE progress_id=%s",
+            (new_level_id, new_cons_pass, new_cons_fail, new_acc, round(final_score, 2), new_total, progress_id),
+        )
+    else:
+        import uuid as _uuid
+        new_progress_id = str(_uuid.uuid4())
+        new_cons_pass = 1 if is_pass else 0
+        new_cons_fail = 0 if is_pass else 1
+        cur.execute(
+            "INSERT INTO patient_task_progress"
+            " (progress_id, patient_id, task_id, current_level_id, consecutive_passes, consecutive_fails,"
+            " overall_accuracy, last_final_score, total_attempts, last_attempted_at)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1,NOW())",
+            (new_progress_id, patient_id, task_id, new_level_id,
+             new_cons_pass, new_cons_fail, round(final_score, 2), round(final_score, 2)),
+        )
+
+
 @celery_app.task(name="app.tasks.analysis.analyze_attempt", bind=True, max_retries=2)
 def analyze_attempt(self, attempt_id):
     # Lazy ML imports — only loaded when the worker actually runs the task
@@ -347,6 +424,10 @@ def analyze_attempt(self, attempt_id):
                 " WHERE attempt_id=%s",
                 ("fail", transcript, attempt_id),
             )
+            _upsert_patient_task_progress(
+                cur, str(patient_id), task_id,
+                level_id, "drop", 0.0, "fail",
+            )
             conn.commit()
             r = redis.from_url(settings.redis_url)
             r.publish(
@@ -435,6 +516,10 @@ def analyze_attempt(self, attempt_id):
             "UPDATE session_prompt_attempt SET result=%s, asr_transcript=%s, speech_detected=true"
             " WHERE attempt_id=%s",
             (pass_fail, transcript, attempt_id),
+        )
+        _upsert_patient_task_progress(
+            cur, str(patient_id), task_id,
+            level_id, adaptive_decision, final_score, pass_fail,
         )
         conn.commit()
 
