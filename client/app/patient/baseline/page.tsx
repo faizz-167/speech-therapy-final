@@ -149,14 +149,28 @@ export default function BaselinePage() {
   if (loading) return <SkeletonList />;
   if (error) return <ErrorBanner message={error} />;
   if (submitted && result) return (
-    <div className="space-y-6 animate-pop-in max-w-lg">
-      <NeoCard accent="secondary" className="space-y-4 text-center">
-        <h2 className="text-2xl font-black uppercase">Baseline Complete!</h2>
-        <div className="text-5xl font-black">{result.raw_score}<span className="text-2xl">/100</span></div>
-        <div className="text-xl font-black uppercase">Level: {result.level}</div>
-        <p className="font-medium">Your therapist will now create a personalised therapy plan for you.</p>
-        <a href="/patient/home"><NeoButton className="w-full">Go to Home</NeoButton></a>
-      </NeoCard>
+    <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-8 animate-pop-in">
+      <h1 className="text-4xl font-black uppercase tracking-widest px-4 text-center">BASELINE ASSESSMENT</h1>
+      
+      <div className="bg-neo-warning border-4 sm:border-8 border-neo-black p-8 sm:p-12 max-w-3xl w-full text-center shadow-neo-lg relative">
+        <div className="text-6xl mb-6">🎉</div>
+        <h2 className="text-3xl sm:text-4xl font-black uppercase tracking-tight mb-8">GREAT WORK!</h2>
+        
+        <p className="font-bold text-lg sm:text-xl mb-4 leading-relaxed">
+           You&apos;ve completed your baseline assessment — that took real effort and courage.
+        </p>
+        <p className="font-bold text-lg sm:text-xl mb-12 leading-relaxed">
+           Your therapist will review your results and craft a personalised therapy plan just for you. You&apos;ll be notified once it&apos;s ready to begin.
+        </p>
+        
+        <div className="inline-block relative hover:scale-105 transition-transform duration-100 ease-linear">
+           <a href="/patient/home">
+             <NeoButton size="lg" className="px-12 py-6 text-xl tracking-widest border-4 bg-neo-accent hover:bg-neo-accent border-neo-black shadow-neo-md text-neo-black hover:text-white transition-colors">
+               BACK TO HOME
+             </NeoButton>
+           </a>
+        </div>
+      </div>
     </div>
   );
 

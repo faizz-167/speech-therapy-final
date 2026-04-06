@@ -55,14 +55,14 @@ function DayColumn({
   }
 
   return (
-    <div className="flex flex-col min-h-[300px]">
-      <div className="border-4 border-black bg-[#FF6B6B] px-3 py-2 font-black uppercase text-center">
+    <div className="flex flex-col min-h-[400px]">
+      <div className="bg-neo-black text-white px-3 py-3 font-black uppercase text-center tracking-widest text-sm shadow-neo-sm">
         {DAYS[dayIndex]}
       </div>
       <div
         ref={setNodeRef}
-        className={`flex-1 border-4 border-t-0 border-black p-2 space-y-2 min-h-[200px] ${
-          isOver ? "bg-[#FFD93D]/30" : "bg-white"
+        className={`flex-1 p-2 space-y-4 min-h-[300px] transition-colors ${
+          isOver ? "bg-neo-secondary/20" : "bg-transparent"
         }`}
       >
         <SortableContext
@@ -77,44 +77,46 @@ function DayColumn({
             />
           ))}
         </SortableContext>
-        {adding ? (
-          <div className="space-y-2">
-            <NeoSelect
-              value={selectedTask}
-              onChange={(e) => setSelectedTask(e.target.value)}
-              className="w-full text-xs"
-            >
-              <option value="">Select task...</option>
-              {availableTasks.map((t) => (
-                <option key={t.task_id} value={t.task_id}>
-                  {t.name}
-                </option>
-              ))}
-            </NeoSelect>
-            <div className="flex gap-1">
-              <NeoButton size="sm" onClick={handleAdd} className="flex-1">
-                Add
-              </NeoButton>
-              <NeoButton
-                size="sm"
-                variant="ghost"
-                onClick={() => setAdding(false)}
-                className="flex-1"
+        
+        {/* ADD SLOT AT BOTTOM */}
+        <div className="pt-4 flex flex-col justify-end">
+          {adding ? (
+            <div className="space-y-2 border-4 border-dashed border-neo-black p-2 bg-white">
+              <NeoSelect
+                value={selectedTask}
+                onChange={(e) => setSelectedTask(e.target.value)}
+                className="w-full text-xs h-10 px-2 border-2"
               >
-                Cancel
-              </NeoButton>
+                <option value="">Select task...</option>
+                {availableTasks.map((t) => (
+                  <option key={t.task_id} value={t.task_id}>
+                    {t.name}
+                  </option>
+                ))}
+              </NeoSelect>
+              <div className="flex gap-2">
+                <NeoButton size="sm" onClick={handleAdd} className="flex-1 py-1 text-xs">
+                  Add
+                </NeoButton>
+                <NeoButton
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setAdding(false)}
+                  className="flex-1 py-1 text-xs"
+                >
+                  Cancel
+                </NeoButton>
+              </div>
             </div>
-          </div>
-        ) : (
-          <NeoButton
-            size="sm"
-            variant="ghost"
-            onClick={() => setAdding(true)}
-            className="w-full border-dashed"
-          >
-            + Add
-          </NeoButton>
-        )}
+          ) : (
+            <button
+              onClick={() => setAdding(true)}
+              className="w-full border-[3px] border-dashed border-neo-black text-neo-black font-black uppercase text-xs py-3 hover:bg-neo-black hover:text-white transition-colors shadow-none"
+            >
+              + Add
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -155,7 +157,7 @@ export function KanbanBoard({
       collisionDetection={closestCorners}
       onDragEnd={handleDragEnd}
     >
-      <div className="grid grid-cols-7 gap-2 overflow-x-auto">
+      <div className="grid grid-cols-7 gap-4 overflow-x-auto pb-8">
         {DAYS.map((_, i) => (
           <DayColumn
             key={i}

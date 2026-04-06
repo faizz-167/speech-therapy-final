@@ -1,6 +1,6 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, Boolean, Numeric, ForeignKey, TIMESTAMP
+from datetime import datetime, timezone, date
+from sqlalchemy import String, Integer, Text, Boolean, Numeric, ForeignKey, TIMESTAMP, Date, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -8,6 +8,7 @@ from app.database import Base
 
 class Session(Base):
     __tablename__ = "session"
+
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("therapy_plan.plan_id"), nullable=True)
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient.patient_id"))
@@ -16,11 +17,13 @@ class Session(Base):
     duration_minutes: Mapped[int | None] = mapped_column(Integer)
     session_type: Mapped[str] = mapped_column(String, default="therapy")
     session_notes: Mapped[str | None] = mapped_column(Text)
+
     attempts: Mapped[list["SessionPromptAttempt"]] = relationship("SessionPromptAttempt", back_populates="session")
 
 
 class SessionPromptAttempt(Base):
     __tablename__ = "session_prompt_attempt"
+
     attempt_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"))
     prompt_id: Mapped[str] = mapped_column(String, ForeignKey("prompt.prompt_id"))
@@ -32,15 +35,19 @@ class SessionPromptAttempt(Base):
     task_mode: Mapped[str | None] = mapped_column(String)
     prompt_type: Mapped[str | None] = mapped_column(String)
     speech_detected: Mapped[bool] = mapped_column(Boolean, default=False)
+    response_latency_sec: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    therapist_override_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     mic_activated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     speech_start_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+
     session: Mapped["Session"] = relationship("Session", back_populates="attempts")
     score_detail: Mapped["AttemptScoreDetail | None"] = relationship("AttemptScoreDetail", back_populates="attempt", uselist=False)
 
 
 class AttemptScoreDetail(Base):
     __tablename__ = "attempt_score_detail"
+
     detail_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     attempt_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session_prompt_attempt.attempt_id"), unique=True)
     word_accuracy: Mapped[float | None] = mapped_column(Numeric)
@@ -52,6 +59,7 @@ class AttemptScoreDetail(Base):
     speech_rate_score: Mapped[float | None] = mapped_column(Numeric)
     confidence_score: Mapped[float | None] = mapped_column(Numeric)
     rl_score: Mapped[float | None] = mapped_column(Numeric)
+    rl_seconds: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     tc_score: Mapped[float | None] = mapped_column(Numeric)
     aq_score: Mapped[float | None] = mapped_column(Numeric)
     behavioral_score: Mapped[float | None] = mapped_column(Numeric)
@@ -74,11 +82,14 @@ class AttemptScoreDetail(Base):
     asr_transcript: Mapped[str | None] = mapped_column(Text)
     audio_duration_sec: Mapped[float | None] = mapped_column(Numeric)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+
     attempt: Mapped["SessionPromptAttempt"] = relationship("SessionPromptAttempt", back_populates="score_detail")
 
 
 class PatientTaskProgress(Base):
     __tablename__ = "patient_task_progress"
+    __table_args__ = (UniqueConstraint("patient_id", "task_id"),)
+
     progress_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient.patient_id"))
     task_id: Mapped[str] = mapped_column(String, ForeignKey("task.task_id"))
@@ -96,10 +107,11 @@ class PatientTaskProgress(Base):
 
 class SessionEmotionSummary(Base):
     __tablename__ = "session_emotion_summary"
+
     summary_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session.session_id"))
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patient.patient_id"))
-    session_date: Mapped[str | None] = mapped_column(String)
+    session_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     dominant_emotion: Mapped[str | None] = mapped_column(String)
     avg_frustration: Mapped[float | None] = mapped_column(Numeric)
     avg_engagement: Mapped[float | None] = mapped_column(Numeric)

@@ -1,6 +1,6 @@
 # SpeechPath — Project Context
 
-> Single source of truth for AI assistants and developers. Last updated: 2026-04-04.
+> Single source of truth for AI assistants and developers. Last updated: 2026-04-05.
 
 ---
 
@@ -146,14 +146,16 @@ sppech-therapy-final/
 │   ├── celery_app.py            # Celery instance, Redis broker/backend config
 │   ├── models/
 │   │   ├── users.py             # Therapist, Patient, PatientStatus
-│   │   ├── content.py           # Defect, Task, TaskLevel, Prompt, SpeechTarget,
-│   │   │                        #   EvaluationTarget, FeedbackRule, PromptScoring,
-│   │   │                        #   TaskDefectMapping, TaskScoringWeights
-│   │   ├── baseline.py          # BaselineAssessment, BaselineSection, BaselineItem,
-│   │   │                        #   PatientBaselineResult, BaselineItemResult
-│   │   ├── plan.py              # TherapyPlan, PlanTaskAssignment
-│   │   └── scoring.py           # Session, SessionPromptAttempt, AttemptScoreDetail,
-│   │                            #   PatientTaskProgress, SessionEmotionSummary
+│   │   ├── content.py           # Defect, Task, TaskLevel, Prompt (merged: speech_target,
+│   │   │                        #   evaluation_target, feedback_rule, prompt_scoring),
+│   │   │                        #   TaskDefectMapping, TaskScoringWeights,
+│   │   │                        #   AdaptiveThreshold, DefectPAThreshold, EmotionWeightsConfig
+│   │   ├── baseline.py          # BaselineAssessment, BaselineDefectMapping, BaselineSection,
+│   │   │                        #   BaselineItem, PatientBaselineResult, BaselineItemResult
+│   │   ├── plan.py              # TherapyPlan, PlanTaskAssignment, PlanRevisionHistory
+│   │   ├── scoring.py           # Session, SessionPromptAttempt, AttemptScoreDetail,
+│   │   │                        #   PatientTaskProgress, SessionEmotionSummary
+│   │   └── operations.py        # AudioFile, TherapistNotification
 │   ├── routers/
 │   │   ├── auth.py              # /auth/register/therapist|patient, /auth/login, /auth/me
 │   │   ├── therapist.py         # /therapist/profile|dashboard|patients
@@ -319,7 +321,7 @@ CS=confidence score, RL=response latency, TC=task completion, AQ=attempt quality
 
 ### Completed
 - Full auth system (JWT, roles, patient approval flow)
-- All DB models + 27-table schema (fully seeded in Neon)
+- All DB models + 27-table schema redesigned (v2.0) — fresh empty database
 - All 9 routers + schemas
 - Celery async analysis pipeline (whisper → hubert → spacy → speechbrain → scoring engine)
 - Scoring formula v2 with adaptive decisions
@@ -330,6 +332,14 @@ CS=confidence score, RL=response latency, TC=task completion, AQ=attempt quality
 - Security fixes from code review (input validation, auth guards, WS timeout)
 
 ### In Progress / Recent Changes
+- **DB schema v2.0 redesign** — all ORM models rewritten from scratch; database reset to empty
+  - `content.py` — merged `speech_target`, `evaluation_target`, `feedback_rule`, `prompt_scoring` into a single `prompt` table; added `AdaptiveThreshold`, `DefectPAThreshold`, `EmotionWeightsConfig` models
+  - `baseline.py` — added `BaselineDefectMapping` many-to-many bridge
+  - `plan.py` — added `PlanRevisionHistory` for Kanban audit log; `start_date`/`end_date` now `Date` type
+  - `operations.py` — new file with `AudioFile` (upload tracking/cleanup) and `TherapistNotification` models
+  - `users.py` — `patient.date_of_birth` now `Date` type; streak tracking columns added
+  - `__init__.py` — updated to export all new model classes
+  - `reset_db.py` — helper script to drop + recreate all tables cleanly
 - `whisper_asr.py` — improved ASR with language hints and fallback handling
 - `analysis.py` — hardened Celery task with proper error isolation per ML step
 - `ws.ts` — added connection timeout and cleanup
@@ -379,7 +389,7 @@ CS=confidence score, RL=response latency, TC=task completion, AQ=attempt quality
 ## Notes for AI Assistants
 
 ### Assumptions
-- Database is already seeded — never generate migration scripts unless explicitly asked
+- Database is empty (fresh schema v2.0, reset on 2026-04-05) — seed data must be inserted before testing; do NOT assume data exists
 - Audio files are stored at `server/uploads/` (relative to server root, set by `UPLOAD_DIR` env var)
 - All ML models run locally on the Celery worker process, not on the FastAPI process
 - The Celery task (`analyze_attempt`) is the only place ML inference happens
@@ -401,7 +411,7 @@ CS=confidence score, RL=response latency, TC=task completion, AQ=attempt quality
 - Do NOT call ML models directly from FastAPI route handlers (always via Celery)
 - Do NOT hardcode secrets, credentials, or environment-specific URLs
 - Do NOT add `console.log` / `print` debug statements in committed code
-- Do NOT run Alembic migrations unless explicitly requested — schema is stable
+- Do NOT run Alembic migrations unless explicitly requested — use `reset_db.py` to drop/recreate tables during dev; schema is managed via SQLAlchemy `create_all`
 - Do NOT add `@lru_cache` to functions that take mutable arguments or database sessions
 - Do NOT bypass WebSocket auth (the 10-second timeout + role check is intentional security)
 - Do NOT use `git add .` — stage specific files to avoid committing `.env` or `uploads/`

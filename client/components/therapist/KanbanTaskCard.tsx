@@ -1,7 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Assignment } from "@/types";
-import { NeoButton } from "@/components/ui/NeoButton";
 
 interface Props {
   assignment: Assignment;
@@ -24,30 +23,35 @@ export function KanbanTaskCard({ assignment, onDelete }: Props) {
     opacity: isDragging ? 0.5 : 1,
   };
 
+  // Deterministic color based on task name length
+  const colors = ["bg-neo-secondary", "bg-neo-accent", "bg-neo-primary", "bg-white", "bg-neo-warning"];
+  const bgColor = colors[(assignment.task_name?.length || 0) % colors.length];
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       {...attributes}
-      className="border-4 border-black bg-white shadow-[3px_3px_0px_0px_#000] p-3 space-y-1"
+      className={`border-4 border-neo-black ${bgColor} shadow-neo-sm p-3 space-y-1 group hover:-translate-y-1 hover:shadow-neo-md transition-all`}
     >
       <div className="flex items-start justify-between gap-2">
         <div {...listeners} className="cursor-grab flex-1">
+          <div className="flex items-center gap-2 mb-1 opacity-50 font-black">
+             <span>∷</span>
+          </div>
           <p className="font-black text-sm uppercase leading-tight">
             {assignment.task_name}
           </p>
-          <p className="text-xs font-medium text-gray-500">
+          <p className="text-xs font-bold opacity-80 mt-1">
             {assignment.task_mode}
           </p>
         </div>
-        <NeoButton
-          size="sm"
-          variant="ghost"
+        <button
           onClick={() => onDelete(assignment.assignment_id)}
-          className="!px-2 !py-0 text-xs border-2"
+          className="border-2 border-neo-black w-6 h-6 flex flex-shrink-0 items-center justify-center font-black bg-white hover:bg-neo-accent transition-colors"
         >
           ✕
-        </NeoButton>
+        </button>
       </div>
     </div>
   );
