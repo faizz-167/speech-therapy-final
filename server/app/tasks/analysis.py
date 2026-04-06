@@ -259,6 +259,63 @@ def analyze_attempt(self, attempt_id):
             if trow and all(v is not None for v in trow):
                 ideal_wpm_min, ideal_wpm_max, wpm_tolerance = trow
 
+        # Load patient defect IDs for per-defect PA threshold lookup
+        cur.execute(
+            "SELECT pre_assigned_defect_ids, date_of_birth FROM patient WHERE patient_id = %s",
+            (patient_id,),
+        )
+        patient_row = cur.fetchone()
+        patient_defect_ids: list[str] = []
+        patient_dob = None
+        if patient_row:
+            defect_json, patient_dob = patient_row
+            if defect_json and isinstance(defect_json, dict):
+                patient_defect_ids = defect_json.get("defect_ids", [])
+
+        # Per-defect PA thresholds — pick the strictest (lowest) min_pa_to_pass
+        defect_pa_min: float | None = None
+        if patient_defect_ids:
+            cur.execute(
+                "SELECT min_pa_to_pass FROM defect_pa_threshold WHERE defect_id = ANY(%s)",
+                (patient_defect_ids,),
+            )
+            pa_rows = cur.fetchall()
+            if pa_rows:
+                defect_pa_min = min(float(r[0]) for r in pa_rows)
+
+        # Emotion weights config by age group
+        age_group = "child"
+        if patient_dob:
+            from datetime import date as _date
+            try:
+                if hasattr(patient_dob, "year"):
+                    dob = patient_dob
+                else:
+                    dob = _date.fromisoformat(str(patient_dob))
+                today = _date.today()
+                age_years = (today - dob).days // 365
+                age_group = "child" if age_years < 18 else ("senior" if age_years >= 65 else "adult")
+            except Exception:
+                age_group = "adult"
+
+        cur.execute(
+            "SELECT w_happy, w_excited, w_neutral, w_surprised, w_sad, w_angry, w_fearful,"
+            " w_positive_affect, w_focused"
+            " FROM emotion_weights_config WHERE age_group = %s",
+            (age_group,),
+        )
+        emotion_weights_row = cur.fetchone()
+
+        # Prompt-level adaptive threshold override
+        cur.execute(
+            "SELECT advance_to_next_level FROM adaptive_threshold WHERE prompt_id = %s",
+            (prompt_id,),
+        )
+        prompt_advance_override = cur.fetchone()
+        prompt_advance_threshold: float | None = None
+        if prompt_advance_override and prompt_advance_override[0] is not None:
+            prompt_advance_threshold = float(prompt_advance_override[0])
+
         conn.close()
         conn = None
 
@@ -331,6 +388,19 @@ def analyze_attempt(self, attempt_id):
             rl_score=rl_score, tc_score=tc_score, aq_score=aq_score,
             emotion_score=emotion_score, weights=weights,
         )
+
+        # Override PA cap threshold with defect-specific threshold if available
+        if defect_pa_min is not None and pa < defect_pa_min:
+            final_score_override = min(scores["final_score"], weights.rule_severe_pa_score_cap)
+            scores = {**scores, "final_score": round(final_score_override, 2)}
+            scores["adaptive_decision"] = "drop"
+            scores["pass_fail"] = "fail"
+            scores["performance_level"] = "needs_improvement"
+
+        # Apply prompt-level advance threshold override
+        if prompt_advance_threshold is not None and scores["adaptive_decision"] == "advance":
+            if scores["final_score"] < prompt_advance_threshold:
+                scores = {**scores, "adaptive_decision": "stay", "pass_fail": "pass", "performance_level": "satisfactory"}
 
         behavioral_score = _as_float(scores["behavioral_score"])
         speech_score = _as_float(scores["speech_score"])
