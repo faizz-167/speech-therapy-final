@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.auth import require_therapist
 from app.models.users import Therapist, Patient
-from app.models.plan import TherapyPlan, PlanTaskAssignment
+from app.models.plan import TherapyPlan, PlanTaskAssignment, PlanRevisionHistory
 from app.models.content import Task, TaskDefectMapping
 from app.schemas.plans import (
     GeneratePlanRequest, PlanOut, AssignmentOut, AddTaskRequest,
@@ -150,6 +150,15 @@ async def add_task(
     )
     db.add(assignment)
     await db.commit()
+    revision = PlanRevisionHistory(
+        plan_id=plan.plan_id,
+        therapist_id=therapist.therapist_id,
+        action="add_task",
+        assignment_id=assignment.assignment_id,
+        new_value={"task_id": str(assignment.task_id), "day_index": assignment.day_index},
+    )
+    db.add(revision)
+    await db.commit()
     return AssignmentOut(
         assignment_id=str(assignment.assignment_id),
         task_id=task.task_id,
@@ -192,6 +201,15 @@ async def update_assignment(
     if body.status is not None:
         assignment.status = body.status
     await db.commit()
+    revision = PlanRevisionHistory(
+        plan_id=plan.plan_id,
+        therapist_id=therapist.therapist_id,
+        action="reorder",
+        assignment_id=assignment.assignment_id,
+        new_value={"day_index": assignment.day_index, "priority_order": assignment.priority_order},
+    )
+    db.add(revision)
+    await db.commit()
     task = await db.get(Task, assignment.task_id)
     return AssignmentOut(
         assignment_id=str(assignment.assignment_id),
@@ -229,7 +247,16 @@ async def delete_assignment(
     assignment = result.scalar_one_or_none()
     if not assignment:
         raise HTTPException(404, "Assignment not found")
+    old_val = {"task_id": str(assignment.task_id), "day_index": assignment.day_index}
     await db.delete(assignment)
+    await db.commit()
+    revision = PlanRevisionHistory(
+        plan_id=plan.plan_id,
+        therapist_id=therapist.therapist_id,
+        action="remove_task",
+        old_value=old_val,
+    )
+    db.add(revision)
     await db.commit()
     return {"message": "Deleted"}
 
@@ -250,6 +277,14 @@ async def approve_plan(
     if not plan:
         raise HTTPException(404, "Plan not found")
     plan.status = "approved"
+    await db.commit()
+    revision = PlanRevisionHistory(
+        plan_id=plan.plan_id,
+        therapist_id=therapist.therapist_id,
+        action="approve",
+        note="Plan approved by therapist.",
+    )
+    db.add(revision)
     await db.commit()
     return {"message": "Plan approved"}
 

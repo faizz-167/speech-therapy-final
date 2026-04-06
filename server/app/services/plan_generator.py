@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import String, cast, select
 
 from app.models.content import Task, TaskDefectMapping, TaskLevel
-from app.models.plan import TherapyPlan, PlanTaskAssignment
+from app.models.plan import TherapyPlan, PlanTaskAssignment, PlanRevisionHistory
 from app.models.users import Patient, Therapist
 
 
@@ -83,6 +83,14 @@ async def generate_weekly_plan(
         )
         db.add(assignment)
 
+    revision = PlanRevisionHistory(
+        plan_id=plan.plan_id,
+        therapist_id=therapist.therapist_id,
+        action="generate",
+        new_value={"task_count": len(tasks[:14]), "baseline_level": baseline_level},
+        note=f"Plan auto-generated at {baseline_level} level for {len(defect_ids)} defect(s).",
+    )
+    db.add(revision)
     await db.commit()
     await db.refresh(plan)
     return plan
