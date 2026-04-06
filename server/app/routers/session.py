@@ -11,6 +11,7 @@ from app.auth import require_patient
 from app.models.users import Patient
 from app.models.content import Prompt
 from app.models.scoring import Session, SessionPromptAttempt, AttemptScoreDetail
+from app.models.operations import AudioFile
 from app.models.plan import TherapyPlan, PlanTaskAssignment
 from app.schemas.session import StartSessionRequest, AttemptStatusResponse
 from app.tasks.analysis import analyze_attempt
@@ -111,6 +112,9 @@ async def submit_attempt(
         content = await audio.read()
         await f.write(content)
 
+    file_size = len(content)
+    ext_mime = "audio/webm" if ext == ".webm" else "audio/wav"
+
     attempt = SessionPromptAttempt(
         attempt_id=uuid.uuid4(),
         session_id=session.session_id,
@@ -124,6 +128,17 @@ async def submit_attempt(
         speech_start_at=parsed_speech_at,
     )
     db.add(attempt)
+    await db.commit()
+
+    audio_file = AudioFile(
+        patient_id=patient.patient_id,
+        session_id=session.session_id,
+        attempt_id=attempt.attempt_id,
+        file_path=filepath,
+        file_size_bytes=file_size,
+        mime_type=ext_mime,
+    )
+    db.add(audio_file)
     await db.commit()
 
     analyze_attempt.delay(str(attempt.attempt_id))
