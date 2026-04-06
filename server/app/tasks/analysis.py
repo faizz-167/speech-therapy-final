@@ -265,6 +265,54 @@ def _upsert_patient_task_progress(
         )
 
 
+def _upsert_session_emotion_summary(cur, session_id: str, patient_id: str) -> None:
+    """Recalculate and upsert session_emotion_summary from all scored attempts in session."""
+    cur.execute(
+        "SELECT asd.dominant_emotion, asd.engagement_score, asd.pass_fail"
+        " FROM attempt_score_detail asd"
+        " JOIN session_prompt_attempt spa ON spa.attempt_id = asd.attempt_id"
+        " WHERE spa.session_id = %s",
+        (session_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return
+
+    emotions = [r[0] for r in rows if r[0]]
+    engagement_scores = [float(r[1]) for r in rows if r[1] is not None]
+    drop_count = sum(1 for r in rows if r[2] == "fail")
+
+    from collections import Counter
+    dominant = Counter(emotions).most_common(1)[0][0] if emotions else "neutral"
+    avg_eng = round(sum(engagement_scores) / len(engagement_scores), 2) if engagement_scores else 0.0
+    frustration_scores = [float(r[1]) for r in rows if r[0] in ("angry", "fearful") and r[1] is not None]
+    avg_frustration = round(sum(frustration_scores) / len(frustration_scores), 2) if frustration_scores else 0.0
+
+    cur.execute(
+        "SELECT summary_id FROM session_emotion_summary WHERE session_id = %s",
+        (session_id,),
+    )
+    existing = cur.fetchone()
+    if existing:
+        cur.execute(
+            "UPDATE session_emotion_summary"
+            " SET dominant_emotion=%s, avg_frustration=%s, avg_engagement=%s, drop_count=%s"
+            " WHERE session_id=%s",
+            (dominant, avg_frustration, avg_eng, drop_count, session_id),
+        )
+    else:
+        import uuid as _uuid
+        from datetime import date as _date
+        cur.execute(
+            "INSERT INTO session_emotion_summary"
+            " (summary_id, session_id, patient_id, session_date, dominant_emotion,"
+            " avg_frustration, avg_engagement, drop_count)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (str(_uuid.uuid4()), session_id, patient_id, _date.today().isoformat(),
+             dominant, avg_frustration, avg_eng, drop_count),
+        )
+
+
 @celery_app.task(name="app.tasks.analysis.analyze_attempt", bind=True, max_retries=2)
 def analyze_attempt(self, attempt_id):
     # Lazy ML imports — only loaded when the worker actually runs the task
@@ -428,6 +476,7 @@ def analyze_attempt(self, attempt_id):
                 cur, str(patient_id), task_id,
                 level_id, "drop", 0.0, "fail",
             )
+            _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
             conn.commit()
             r = redis.from_url(settings.redis_url)
             r.publish(
@@ -521,6 +570,7 @@ def analyze_attempt(self, attempt_id):
             cur, str(patient_id), task_id,
             level_id, adaptive_decision, final_score, pass_fail,
         )
+        _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
         conn.commit()
 
         r = redis.from_url(settings.redis_url)
