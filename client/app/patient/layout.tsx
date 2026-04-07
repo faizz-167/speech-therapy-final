@@ -10,17 +10,18 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
   const { token, role, bootstrapped, bootstrapAuth } = useAuthStore();
 
   useEffect(() => {
-    if (!bootstrapped) {
-      bootstrapAuth();
+    bootstrapAuth();
+    // Stable Zustand action, safe to call on mount
+  }, []);
+
+  useEffect(() => {
+    if (bootstrapped && (!token || role !== "patient")) {
+      router.push("/login");
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bootstrapped, token, role, router]);
 
   if (!bootstrapped) return <BootstrapLoader />;
-
-  if (!token || role !== "patient") {
-    router.push("/login");
-    return null;
-  }
+  if (!token || role !== "patient") return null;
 
   return (
     <div className="min-h-screen flex flex-col">

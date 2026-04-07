@@ -52,6 +52,13 @@ export const useAuthStore = create<AuthState>()(
       name: "auth-storage",
       storage: createJSONStorage(() => localStorage),
       onRehydrateStorage: () => (state) => { state?.setHydrated(); },
+      partialize: (state) => ({
+        token: state.token,
+        role: state.role,
+        userId: state.userId,
+        fullName: state.fullName,
+        // bootstrapped intentionally excluded — re-validated on each app load
+      }),
     }
   )
 );

@@ -10,17 +10,18 @@ export default function TherapistLayout({ children }: { children: React.ReactNod
   const { token, role, bootstrapped, bootstrapAuth } = useAuthStore();
 
   useEffect(() => {
-    if (!bootstrapped) {
-      bootstrapAuth();
+    bootstrapAuth();
+    // Stable Zustand action, safe to call on mount
+  }, []);
+
+  useEffect(() => {
+    if (bootstrapped && (!token || role !== "therapist")) {
+      router.push("/login");
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bootstrapped, token, role, router]);
 
   if (!bootstrapped) return <BootstrapLoader />;
-
-  if (!token || role !== "therapist") {
-    router.push("/login");
-    return null;
-  }
+  if (!token || role !== "therapist") return null;
 
   return (
     <div className="min-h-screen flex flex-col">
