@@ -3,20 +3,24 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { TherapistNav } from "@/components/therapist/TherapistNav";
+import { BootstrapLoader } from "@/components/ui/BootstrapLoader";
 
 export default function TherapistLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { token, role, hydrated } = useAuthStore();
+  const { token, role, bootstrapped, bootstrapAuth } = useAuthStore();
 
   useEffect(() => {
-    if (!hydrated) return;
-    if (!token || role !== "therapist") {
-      const t = setTimeout(() => router.push("/login"), 0);
-      return () => clearTimeout(t);
+    if (!bootstrapped) {
+      bootstrapAuth();
     }
-  }, [hydrated, token, role, router]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!hydrated || !token || role !== "therapist") return null;
+  if (!bootstrapped) return <BootstrapLoader />;
+
+  if (!token || role !== "therapist") {
+    router.push("/login");
+    return null;
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
