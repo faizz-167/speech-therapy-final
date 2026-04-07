@@ -2,26 +2,15 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
-
-interface AssignedDefect { defect_id: string; name: string; category: string; }
-interface Profile {
-  patient_id: string;
-  full_name: string;
-  email: string;
-  date_of_birth: string;
-  gender: string | null;
-  status: string;
-  current_streak: number;
-  assigned_defects: AssignedDefect[];
-}
+import { PatientProfile } from "@/types";
 
 export default function PatientProfilePage() {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<PatientProfile | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     api
-      .get<Profile>("/patient/profile")
+      .get<PatientProfile>("/patient/profile")
       .then(setProfile)
       .catch((e: Error) => setError(e.message));
   }, []);

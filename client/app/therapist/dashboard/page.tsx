@@ -5,15 +5,14 @@ import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
 import Link from "next/link";
-
-interface Dashboard { total_patients: number; approved_patients: number; pending_patients: number; }
+import { TherapistDashboard } from "@/types";
 
 export default function DashboardPage() {
-  const [data, setData] = useState<Dashboard | null>(null);
+  const [data, setData] = useState<TherapistDashboard | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.get<Dashboard>("/therapist/dashboard").then(setData).catch((e) => setError(e.message));
+    api.get<TherapistDashboard>("/therapist/dashboard").then(setData).catch((e) => setError(e.message));
   }, []);
 
   if (error) return <ErrorBanner message={error} />;

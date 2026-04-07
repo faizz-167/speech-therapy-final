@@ -4,8 +4,7 @@ import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
-
-interface BaselineResult { result_id: string; baseline_name: string; raw_score: number; level: string; assessed_on: string; }
+import { BaselineResult } from "@/types";
 
 export default function TherapistBaselinePage() {
   const { id } = useParams<{ id: string }>();

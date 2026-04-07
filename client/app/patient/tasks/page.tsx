@@ -1,18 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Assignment } from "@/types";
+import { Assignment, HomeSummary } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
 import Link from "next/link";
-
-interface HomeSummary {
-  has_approved_plan: boolean;
-  plan_name: string | null;
-  plan_start_date: string | null;
-  plan_end_date: string | null;
-}
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Assignment[]>([]);

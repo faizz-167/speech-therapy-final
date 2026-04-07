@@ -5,17 +5,7 @@ import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { SkeletonList } from "@/components/ui/Skeletons";
 import Link from "next/link";
-
-interface HomeData {
-  has_baseline: boolean;
-  full_name: string;
-  today_tasks: number;
-  has_approved_plan: boolean;
-  plan_status: string | null;
-  plan_name: string | null;
-  plan_start_date: string | null;
-  plan_end_date: string | null;
-}
+import { HomeData } from "@/types";
 
 export default function PatientHomePage() {
   const [data, setData] = useState<HomeData | null>(null);

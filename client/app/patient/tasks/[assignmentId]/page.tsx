@@ -4,24 +4,12 @@ import { useParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
 import { createWebSocket } from "@/lib/ws";
-import { Prompt } from "@/types";
+import { Prompt, PollResult, RecordingMeta, Phase } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { Recorder } from "@/components/patient/Recorder";
 import { ScoreDisplay } from "@/components/patient/ScoreDisplay";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
-
-type Phase = "instruction" | "record" | "uploading" | "scoring" | "scored" | "timeout";
-
-interface PollResult {
-  result: string;
-  score: Record<string, unknown> | null;
-}
-
-interface RecordingMeta {
-  micActivatedAt: string;
-  speechStartAt: string | null;
-}
 
 export default function ExercisePage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();

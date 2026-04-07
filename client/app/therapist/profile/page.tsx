@@ -3,15 +3,14 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
-
-interface Profile { therapist_id: string; full_name: string; email: string; therapist_code: string; license_number: string | null; specialization: string | null; years_of_experience: number | null; }
+import { TherapistProfile } from "@/types";
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<TherapistProfile | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.get<Profile>("/therapist/profile").then(setProfile).catch((e) => setError(e.message));
+    api.get<TherapistProfile>("/therapist/profile").then(setProfile).catch((e) => setError(e.message));
   }, []);
 
   if (error) return <ErrorBanner message={error} />;

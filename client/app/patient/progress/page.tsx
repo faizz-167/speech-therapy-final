@@ -14,20 +14,7 @@ import {
   BarChart,
   Bar,
 } from "recharts";
-
-interface Progress {
-  total_attempts: number;
-  avg_final_score: number;
-  pass_rate: number;
-  weekly_trend: { week: string; avg_score: number; attempts: number }[];
-  task_metrics: {
-    task_name: string;
-    overall_accuracy: number;
-    total_attempts: number;
-    current_level: string | null;
-  }[];
-  dominant_emotion: string | null;
-}
+import { Progress } from "@/types";
 
 export default function ProgressPage() {
   const [data, setData] = useState<Progress | null>(null);

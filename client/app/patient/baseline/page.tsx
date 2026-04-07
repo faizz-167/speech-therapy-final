@@ -4,42 +4,12 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
-
-interface BaselineItem {
-  item_id: string;
-  task_name: string | null;
-  instruction: string | null;
-  display_content: string | null;
-  expected_output: string | null;
-  response_type: string | null;
-}
-interface BaselineSection {
-  section_id: string;
-  section_name: string;
-  instructions: string | null;
-  items: BaselineItem[];
-}
-interface BaselineAssessment {
-  baseline_id: string;
-  name: string;
-  domain: string;
-  sections: BaselineSection[];
-}
-interface AttemptResult {
-  attempt_id: string;
-  result: string;
-  computed_score: number | null;
-  phoneme_accuracy: number | null;
-  asr_transcript: string | null;
-}
-
-interface BaselineCompletionResult {
-  result_id: string;
-  baseline_name: string;
-  raw_score: number;
-  level: string;
-  assessed_on: string;
-}
+import {
+  BaselineItem,
+  BaselineAssessment,
+  AttemptResult,
+  BaselineCompletionResult,
+} from "@/types";
 
 type Phase = "loading" | "ready" | "recording" | "uploading" | "polling" | "scored" | "complete" | "error";
 
