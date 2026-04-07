@@ -11,12 +11,7 @@ export class AuthError extends Error {
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem("auth-storage");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed?.state?.token ?? null;
-  } catch { return null; }
+  return useAuthStore.getState().token;
 }
 
 async function request<T>(path: string, init: RequestInit & { timeout?: number } = {}): Promise<T> {
@@ -31,14 +26,18 @@ async function request<T>(path: string, init: RequestInit & { timeout?: number }
   if (!(rest.body instanceof FormData)) headers["Content-Type"] = "application/json";
   try {
     const res = await fetch(`${BASE_URL}${path}`, { ...rest, headers, signal: controller.signal });
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401) {
       const { clearAuth, setSessionExpired } = useAuthStore.getState();
       clearAuth();
       setSessionExpired(true);
       if (typeof window !== "undefined") {
         window.location.href = "/login";
       }
-      throw new AuthError();
+      throw new AuthError("Session expired. Please log in again.");
+    }
+
+    if (res.status === 403) {
+      throw new AuthError("You don't have permission to perform this action.");
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));

@@ -11,7 +11,6 @@ import Link from "next/link";
 export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
-  const sessionExpired = useAuthStore((s) => s.sessionExpired);
   const setSessionExpired = useAuthStore((s) => s.setSessionExpired);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,11 +19,12 @@ export default function LoginPage() {
   const [showExpiredBanner, setShowExpiredBanner] = useState(false);
 
   useEffect(() => {
-    if (sessionExpired) {
+    const expired = useAuthStore.getState().sessionExpired;
+    if (expired) {
       setShowExpiredBanner(true);
       setSessionExpired(false);
     }
-  }, []); // run once on mount to latch value before it is cleared
+  }, [setSessionExpired]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
