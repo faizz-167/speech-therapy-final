@@ -140,7 +140,7 @@ export default function BaselinePage() {
   };
 
   if (phase === "loading") {
-    return <LoadingState message="Loading baseline exercises…" />;
+    return <LoadingState label="Loading baseline exercises..." />;
   }
 
   if (phase === "error") {

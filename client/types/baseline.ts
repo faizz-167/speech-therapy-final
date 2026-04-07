@@ -5,6 +5,10 @@ export interface BaselineItem {
   display_content: string | null;
   expected_output: string | null;
   response_type: string | null;
+  target_phoneme: string | null;
+  formula_weights: Record<string, number> | null;
+  fusion_weights: Record<string, number> | null;
+  wpm_range: Record<string, number> | null;
 }
 
 export interface BaselineSection {
@@ -37,4 +41,3 @@ export interface BaselineResult {
   level: string;
   assessed_on: string;
 }
-

@@ -4,24 +4,27 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { TherapistNav } from "@/components/therapist/TherapistNav";
 import { BootstrapLoader } from "@/components/ui/BootstrapLoader";
+import { onAuthExpired } from "@/lib/api";
 
 export default function TherapistLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { token, role, bootstrapped, bootstrapAuth } = useAuthStore();
+  const { role, hydrated, bootstrapped, bootstrapAuth } = useAuthStore();
 
   useEffect(() => {
-    bootstrapAuth();
-    // Stable Zustand action, safe to call on mount
-  }, []);
+    if (!hydrated) return;
+    void bootstrapAuth();
+  }, [hydrated, bootstrapAuth]);
+
+  useEffect(() => onAuthExpired(() => router.push("/login")), [router]);
 
   useEffect(() => {
-    if (bootstrapped && (!token || role !== "therapist")) {
+    if (bootstrapped && role !== "therapist") {
       router.push("/login");
     }
-  }, [bootstrapped, token, role, router]);
+  }, [bootstrapped, role, router]);
 
-  if (!bootstrapped) return <BootstrapLoader />;
-  if (!token || role !== "therapist") return null;
+  if (!hydrated || !bootstrapped) return <BootstrapLoader />;
+  if (role !== "therapist") return null;
 
   return (
     <div className="min-h-screen flex flex-col">

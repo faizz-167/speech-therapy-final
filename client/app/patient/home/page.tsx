@@ -3,32 +3,24 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
-import { SkeletonList } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import Link from "next/link";
 import { HomeData } from "@/types";
 
 export default function PatientHomePage() {
   const [data, setData] = useState<HomeData | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     api
       .get<HomeData>("/patient/home")
       .then(setData)
-      .catch(() => {
-        setData({
-          has_baseline: false,
-          full_name: "",
-          today_tasks: 0,
-          has_approved_plan: false,
-          plan_status: null,
-          plan_name: null,
-          plan_start_date: null,
-          plan_end_date: null,
-        });
-      });
+      .catch((err: Error) => setError(err.message));
   }, []);
 
-  if (!data) return <SkeletonList count={2} />;
+  if (error) return <ErrorState message={error} />;
+  if (!data) return <LoadingState label="Loading your home screen..." />;
 
   return (
     <div className="space-y-10 animate-fade-up max-w-4xl mx-auto p-4 md:p-8">

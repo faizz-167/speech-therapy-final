@@ -5,7 +5,9 @@ import { api } from "@/lib/api";
 import { Plan, Task, Assignment } from "@/types";
 import { KanbanBoard } from "@/components/therapist/KanbanBoard";
 import { NeoButton } from "@/components/ui/NeoButton";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { EmptyState } from "@/components/ui/EmptyState";
 import Link from "next/link";
 
 export default function PlanPage() {
@@ -123,8 +125,8 @@ export default function PlanPage() {
     }
   }
 
-  if (loading) return <SkeletonList />;
-  if (error) return <ErrorBanner message={error} />;
+  if (loading) return <LoadingState label="Loading plan..." />;
+  if (error) return <ErrorState message={error} />;
 
   return (
     <div className="space-y-6 animate-fade-up pt-4">
@@ -135,22 +137,22 @@ export default function PlanPage() {
       </div>
 
       {!plan ? (
-        <div className="bg-white border-4 border-neo-black p-8 text-center shadow-neo-sm">
-          <span className="text-4xl block mb-4">📝</span>
-          <p className="font-black uppercase text-xl">
-            No plan exists for this patient yet.<br/>Click Generate Plan above to construct a weekly progression framework.
-          </p>
-          <NeoButton variant="secondary" onClick={handleGenerate} disabled={generating} className="mt-6 bg-neo-warning text-neo-black shadow-neo-sm">
-             {generating ? "GENERATING..." : "🔄 GENERATE NEW PLAN"}
-          </NeoButton>
-        </div>
+        <EmptyState
+          icon="📝"
+          heading="No Plan Yet"
+          subtext="Generate a weekly progression framework for this patient."
+          cta={{
+            label: generating ? "Generating..." : "Generate New Plan",
+            onClick: handleGenerate,
+          }}
+        />
       ) : (
         <>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-end border-b-4 border-neo-black pb-4">
              <div>
-                <h2 className="font-black text-3xl uppercase tracking-tighter shadow-neo-sm border-2 border-transparent inline-block bg-white px-2 py-1 rotate-1">{plan.plan_name || `Week of ${plan.start_date}`}</h2>
+                <h2 className="font-black text-3xl uppercase tracking-tighter shadow-neo-sm border-2 border-transparent inline-block bg-white px-2 py-1 rotate-1">{plan.plan_name || `Week of ${plan.start_date ?? "TBD"}`}</h2>
                 <div className="font-bold tracking-widest text-sm mt-3 uppercase">
-                  {plan.start_date} — {plan.end_date}
+                  {plan.start_date ?? "TBD"} — {plan.end_date ?? "TBD"}
                 </div>
              </div>
              

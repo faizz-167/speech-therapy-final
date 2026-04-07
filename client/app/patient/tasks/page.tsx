@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { Assignment, HomeSummary } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
-import { SkeletonList } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import Link from "next/link";
@@ -28,7 +28,7 @@ export default function TasksPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <SkeletonList />;
+  if (loading) return <LoadingState label="Loading your tasks..." />;
   if (error) return <ErrorState message={error} />;
 
   const day = new Date().toLocaleDateString("en-US", {
@@ -46,10 +46,13 @@ export default function TasksPage() {
 
       {tasks.length === 0 ? (
         <EmptyState
-          message="No tasks scheduled for today."
-          hint={homeSummary?.has_approved_plan
-            ? `Your plan "${homeSummary.plan_name}" runs from ${homeSummary.plan_start_date} to ${homeSummary.plan_end_date}.`
-            : undefined}
+          icon="📭"
+          heading="No Tasks Scheduled"
+          subtext={
+            homeSummary?.has_approved_plan
+              ? `Your plan "${homeSummary.plan_name}" runs from ${homeSummary.plan_start_date} to ${homeSummary.plan_end_date}.`
+              : "Your therapist has not scheduled tasks for today."
+          }
         />
       ) : (
         <div className="space-y-4">

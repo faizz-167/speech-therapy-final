@@ -1,11 +1,7 @@
 "use client";
 import { useState, useRef } from "react";
 import { NeoButton } from "@/components/ui/NeoButton";
-
-interface RecordingMeta {
-  micActivatedAt: string;
-  speechStartAt: string | null;
-}
+import type { RecordingMeta } from "@/types";
 
 interface RecorderProps {
   onRecordingComplete: (blob: Blob, meta: RecordingMeta) => void;

@@ -4,12 +4,14 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
 import { createWebSocket } from "@/lib/ws";
-import { Prompt, PollResult, RecordingMeta, SessionPhase } from "@/types";
+import { AttemptScore, Prompt, PollResult, RecordingMeta, SessionPhase } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { Recorder } from "@/components/patient/Recorder";
 import { ScoreDisplay } from "@/components/patient/ScoreDisplay";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export default function ExercisePage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();
@@ -18,7 +20,7 @@ export default function ExercisePage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [promptIdx, setPromptIdx] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>("instruction");
-  const [score, setScore] = useState<Record<string, unknown> | null>(null);
+  const [score, setScore] = useState<AttemptScore | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -135,9 +137,18 @@ export default function ExercisePage() {
     }
   }
 
-  if (loading) return <SkeletonList />;
-  if (error) return <ErrorBanner message={error} />;
-  if (!currentPrompt) return <ErrorBanner message="No prompts available for this task." />;
+  if (loading) return <LoadingState label="Loading exercise..." />;
+  if (error) return <ErrorState message={error} />;
+  if (!currentPrompt) {
+    return (
+      <EmptyState
+        icon="🎤"
+        heading="No Prompts Available"
+        subtext="This assignment does not have any prompts configured yet."
+        cta={{ label: "Back to Tasks", onClick: () => router.push("/patient/tasks") }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-up max-w-2xl">
@@ -218,7 +229,7 @@ export default function ExercisePage() {
 
       {phase === "scored" && score && (
         <>
-          <ScoreDisplay score={score as Parameters<typeof ScoreDisplay>[0]["score"]} />
+          <ScoreDisplay score={score} />
           <NeoButton className="w-full" onClick={nextPrompt}>
             {promptIdx < prompts.length - 1 ? "Next Prompt →" : "Complete Task ✓"}
           </NeoButton>

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -15,7 +15,8 @@ from app.database import get_db
 from app.models.users import Therapist, Patient, PatientStatus
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-bearer_scheme = HTTPBearer()
+bearer_scheme = HTTPBearer(auto_error=False)
+COOKIE_NAME = "speechpath_token"
 
 
 def hash_password(password: str) -> str:
@@ -43,11 +44,41 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
+def set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=settings.access_token_expire_minutes * 60,
+        path="/",
+    )
+
+
+def clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(key=COOKIE_NAME, httponly=True, samesite="lax", path="/")
+
+
+def get_request_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> str:
+    if credentials and credentials.credentials:
+        return credentials.credentials
+
+    cookie_token = request.cookies.get(COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+
 async def require_therapist(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
+    token: Annotated[str, Depends(get_request_token)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Therapist:
-    payload = decode_token(credentials.credentials)
+    payload = decode_token(token)
     if payload.get("role") != "therapist":
         raise HTTPException(status_code=403, detail="Therapist access required")
     result = await db.execute(select(Therapist).where(Therapist.therapist_id == uuid.UUID(payload["sub"])))
@@ -58,10 +89,10 @@ async def require_therapist(
 
 
 async def require_patient(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
+    token: Annotated[str, Depends(get_request_token)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Patient:
-    payload = decode_token(credentials.credentials)
+    payload = decode_token(token)
     if payload.get("role") != "patient":
         raise HTTPException(status_code=403, detail="Patient access required")
     result = await db.execute(select(Patient).where(Patient.patient_id == uuid.UUID(payload["sub"])))

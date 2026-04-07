@@ -1,6 +1,17 @@
 import { useAuthStore } from "@/store/auth";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const PUBLIC_AUTH_PATHS = new Set([
+  "/auth/login",
+  "/auth/register/patient",
+  "/auth/register/therapist",
+]);
+
+export type AuthFailureReason = 401 | 403;
+
+type AuthFailureHandler = (reason: AuthFailureReason) => void;
+
+let authFailureHandler: AuthFailureHandler | null = null;
 
 export class AuthError extends Error {
   constructor(message = "Session expired. Please log in again.") {
@@ -9,13 +20,27 @@ export class AuthError extends Error {
   }
 }
 
+export function onAuthExpired(handler: AuthFailureHandler | null) {
+  authFailureHandler = handler;
+
+  return () => {
+    if (authFailureHandler === handler) {
+      authFailureHandler = null;
+    }
+  };
+}
+
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return useAuthStore.getState().token;
 }
 
-async function request<T>(path: string, init: RequestInit & { timeout?: number } = {}): Promise<T> {
-  const { timeout = 15000, ...rest } = init;
+async function request<T>(
+  path: string,
+  init: RequestInit & { timeout?: number; handleAuthFailure?: boolean } = {}
+): Promise<T> {
+  const publicAuthPath = PUBLIC_AUTH_PATHS.has(path);
+  const { timeout = 15000, handleAuthFailure = !publicAuthPath, ...rest } = init;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   const token = getToken();
@@ -25,18 +50,22 @@ async function request<T>(path: string, init: RequestInit & { timeout?: number }
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (!(rest.body instanceof FormData)) headers["Content-Type"] = "application/json";
   try {
-    const res = await fetch(`${BASE_URL}${path}`, { ...rest, headers, signal: controller.signal });
-    if (res.status === 401) {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      ...rest,
+      credentials: "include",
+      headers,
+      signal: controller.signal,
+    });
+    if (res.status === 401 && handleAuthFailure) {
       const { clearAuth, setSessionExpired } = useAuthStore.getState();
       clearAuth();
       setSessionExpired(true);
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
-      }
+      authFailureHandler?.(401);
       throw new AuthError("Session expired. Please log in again.");
     }
 
-    if (res.status === 403) {
+    if (res.status === 403 && handleAuthFailure) {
+      authFailureHandler?.(403);
       throw new AuthError("You don't have permission to perform this action.");
     }
     if (!res.ok) {
@@ -50,9 +79,20 @@ async function request<T>(path: string, init: RequestInit & { timeout?: number }
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path, { method: "GET" }),
-  post: <T>(path: string, body: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body) }),
-  patch: <T>(path: string, body: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
-  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
-  upload: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form, timeout: 60000 }),
+  get: <T>(path: string, options?: RequestInit & { timeout?: number; handleAuthFailure?: boolean }) =>
+    request<T>(path, { ...options, method: "GET" }),
+  post: <T>(
+    path: string,
+    body: unknown,
+    options?: RequestInit & { timeout?: number; handleAuthFailure?: boolean }
+  ) => request<T>(path, { ...options, method: "POST", body: JSON.stringify(body) }),
+  patch: <T>(
+    path: string,
+    body: unknown,
+    options?: RequestInit & { timeout?: number; handleAuthFailure?: boolean }
+  ) => request<T>(path, { ...options, method: "PATCH", body: JSON.stringify(body) }),
+  delete: <T>(path: string, options?: RequestInit & { timeout?: number; handleAuthFailure?: boolean }) =>
+    request<T>(path, { ...options, method: "DELETE" }),
+  upload: <T>(path: string, form: FormData, options?: RequestInit & { timeout?: number; handleAuthFailure?: boolean }) =>
+    request<T>(path, { ...options, method: "POST", body: form, timeout: 60000 }),
 };

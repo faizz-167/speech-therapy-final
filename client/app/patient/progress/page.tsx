@@ -2,7 +2,9 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { EmptyState } from "@/components/ui/EmptyState";
 import {
   LineChart,
   Line,
@@ -27,8 +29,17 @@ export default function ProgressPage() {
       .catch((e: Error) => setError(e.message));
   }, []);
 
-  if (error) return <ErrorBanner message={error} />;
-  if (!data) return <SkeletonList />;
+  if (error) return <ErrorState message={error} />;
+  if (!data) return <LoadingState label="Loading progress..." />;
+  if (data.total_attempts === 0) {
+    return (
+      <EmptyState
+        icon="📈"
+        heading="No Progress Yet"
+        subtext="Complete your first exercise session to start seeing trends here."
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-up">

@@ -3,7 +3,9 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { EmptyState } from "@/components/ui/EmptyState";
 import {
   LineChart,
   Line,
@@ -27,8 +29,17 @@ export default function TherapistPatientProgressPage() {
       .catch((e: Error) => setError(e.message));
   }, [id]);
 
-  if (error) return <ErrorBanner message={error} />;
-  if (!data) return <SkeletonList />;
+  if (error) return <ErrorState message={error} />;
+  if (!data) return <LoadingState label="Loading patient progress..." />;
+  if (data.total_attempts === 0) {
+    return (
+      <EmptyState
+        icon="📉"
+        heading="No Progress Data Yet"
+        subtext="This patient has not completed any scored attempts."
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-up">

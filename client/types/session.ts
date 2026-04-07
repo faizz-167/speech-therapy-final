@@ -9,15 +9,12 @@ export interface Prompt {
 }
 
 export interface AttemptScore {
-  attempt_id: string;
   attempt_number: number | null;
   word_accuracy: number | null;
   phoneme_accuracy: number | null;
   fluency_score: number | null;
   speech_rate_wpm: number | null;
   speech_rate_score: number | null;
-  disfluency_rate: number | null;
-  pause_score: number | null;
   behavioral_score: number | null;
   emotion_score: number | null;
   dominant_emotion: string | null;
@@ -35,7 +32,7 @@ export interface AttemptScore {
 
 export interface PollResult {
   result: string;
-  score: Record<string, unknown> | null;
+  score: AttemptScore | null;
 }
 
 export interface RecordingMeta {

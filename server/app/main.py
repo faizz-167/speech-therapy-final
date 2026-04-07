@@ -4,7 +4,7 @@ import os
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
-from app.auth import decode_token
+from app.auth import COOKIE_NAME, decode_token
 from app.config import settings
 from app.routers import auth, therapist, plans, patient, baseline, session, progress
 
@@ -36,13 +36,15 @@ async def health():
 @app.websocket("/ws/{patient_id}")
 async def websocket_endpoint(websocket: WebSocket, patient_id: str):
     await websocket.accept()
-    # Expect {"type": "auth", "token": "<jwt>"} as the first message within 10 s.
-    try:
-        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
-    except (asyncio.TimeoutError, Exception):
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-    token = auth_msg.get("token") if isinstance(auth_msg, dict) else None
+    token = websocket.cookies.get(COOKIE_NAME)
+    if not token:
+        # Fall back to explicit auth message for the current browser tab session.
+        try:
+            auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+        except (asyncio.TimeoutError, Exception):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        token = auth_msg.get("token") if isinstance(auth_msg, dict) else None
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return

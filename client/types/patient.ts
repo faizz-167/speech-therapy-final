@@ -6,7 +6,6 @@ export interface Patient {
   gender: string | null;
   status: "pending" | "approved";
   pre_assigned_defect_ids: { defect_ids: string[] } | null;
-  primary_diagnosis: string | null;
   created_at: string;
 }
 

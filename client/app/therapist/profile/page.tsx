@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { TherapistProfile } from "@/types";
 
 export default function ProfilePage() {
@@ -13,8 +14,8 @@ export default function ProfilePage() {
     api.get<TherapistProfile>("/therapist/profile").then(setProfile).catch((e) => setError(e.message));
   }, []);
 
-  if (error) return <ErrorBanner message={error} />;
-  if (!profile) return <SkeletonList count={1} />;
+  if (error) return <ErrorState message={error} />;
+  if (!profile) return <LoadingState label="Loading therapist profile..." />;
 
   return (
     <div className="space-y-6 animate-fade-up max-w-lg">

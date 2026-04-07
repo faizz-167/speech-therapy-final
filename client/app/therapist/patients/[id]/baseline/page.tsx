@@ -3,7 +3,9 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { BaselineResult } from "@/types";
 
 export default function TherapistBaselinePage() {
@@ -17,14 +19,18 @@ export default function TherapistBaselinePage() {
       .then(setResult).catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load")).finally(() => setLoading(false));
   }, [id]);
 
-  if (loading) return <SkeletonList count={1} />;
-  if (error) return <ErrorBanner message={error} />;
+  if (loading) return <LoadingState label="Loading baseline results..." />;
+  if (error) return <ErrorState message={error} />;
 
   return (
     <div className="space-y-6 animate-fade-up max-w-lg">
       <h1 className="text-2xl font-black uppercase">Baseline Results</h1>
       {!result ? (
-        <NeoCard><p className="font-bold">Patient has not completed baseline yet.</p></NeoCard>
+        <EmptyState
+          icon="🧪"
+          heading="Baseline Not Completed"
+          subtext="This patient has not completed their baseline assessment yet."
+        />
       ) : (
         <NeoCard accent="secondary" className="space-y-4">
           <p className="font-black uppercase text-sm">{result.baseline_name}</p>

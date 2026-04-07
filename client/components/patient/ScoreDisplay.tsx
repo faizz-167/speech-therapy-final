@@ -1,28 +1,7 @@
 import { NeoCard } from "@/components/ui/NeoCard";
+import type { AttemptScore } from "@/types";
 
-interface Score {
-  attempt_number?: number;
-  final_score?: number;
-  pass_fail?: string;
-  adaptive_decision?: string;
-  word_accuracy?: number;
-  phoneme_accuracy?: number;
-  fluency_score?: number;
-  speech_rate_wpm?: number;
-  speech_rate_score?: number;
-  confidence_score?: number;
-  behavioral_score?: number;
-  emotion_score?: number;
-  dominant_emotion?: string;
-  engagement_score?: number;
-  speech_score?: number;
-  asr_transcript?: string;
-  performance_level?: string;
-  review_recommended?: boolean;
-  fail_reason?: string | null;
-}
-
-export function ScoreDisplay({ score }: { score: Score }) {
+export function ScoreDisplay({ score }: { score: AttemptScore }) {
   const isPassed = score.pass_fail === "pass";
   return (
     <div className="space-y-4 animate-pop-in">

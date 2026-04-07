@@ -4,24 +4,27 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { PatientNav } from "@/components/patient/PatientNav";
 import { BootstrapLoader } from "@/components/ui/BootstrapLoader";
+import { onAuthExpired } from "@/lib/api";
 
 export default function PatientLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { token, role, bootstrapped, bootstrapAuth } = useAuthStore();
+  const { role, hydrated, bootstrapped, bootstrapAuth } = useAuthStore();
 
   useEffect(() => {
-    bootstrapAuth();
-    // Stable Zustand action, safe to call on mount
-  }, []);
+    if (!hydrated) return;
+    void bootstrapAuth();
+  }, [hydrated, bootstrapAuth]);
+
+  useEffect(() => onAuthExpired(() => router.push("/login")), [router]);
 
   useEffect(() => {
-    if (bootstrapped && (!token || role !== "patient")) {
+    if (bootstrapped && role !== "patient") {
       router.push("/login");
     }
-  }, [bootstrapped, token, role, router]);
+  }, [bootstrapped, role, router]);
 
-  if (!bootstrapped) return <BootstrapLoader />;
-  if (!token || role !== "patient") return null;
+  if (!hydrated || !bootstrapped) return <BootstrapLoader />;
+  if (role !== "patient") return null;
 
   return (
     <div className="min-h-screen flex flex-col">

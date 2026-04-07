@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/auth";
 import { NeoInput } from "@/components/ui/NeoInput";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { NeoCard } from "@/components/ui/NeoCard";
+import type { TokenResponse } from "@/types";
 import Link from "next/link";
 
 export default function TherapistRegisterPage() {
@@ -23,11 +24,11 @@ export default function TherapistRegisterPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await api.post<{ access_token: string; role: string; user_id: string; full_name: string }>(
+      const res = await api.post<TokenResponse>(
         "/auth/register/therapist",
         { ...form, years_of_experience: form.years_of_experience ? Number(form.years_of_experience) : null }
       );
-      setAuth(res.access_token, "therapist", res.user_id, res.full_name);
+      setAuth(res.access_token, res.role, res.user_id, res.full_name);
       router.push("/therapist/dashboard");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Registration failed");

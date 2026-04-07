@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { PatientProfile } from "@/types";
 
 export default function PatientProfilePage() {
@@ -15,8 +16,8 @@ export default function PatientProfilePage() {
       .catch((e: Error) => setError(e.message));
   }, []);
 
-  if (error) return <ErrorBanner message={error} />;
-  if (!profile) return <SkeletonList count={1} />;
+  if (error) return <ErrorState message={error} />;
+  if (!profile) return <LoadingState label="Loading your profile..." />;
 
   return (
     <div className="space-y-6 animate-fade-up max-w-3xl mx-auto pt-8">
@@ -61,7 +62,7 @@ export default function PatientProfilePage() {
         </div>
         <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-gray-50">
           <span className="font-black uppercase text-gray-500 tracking-wider">Therapist</span>
-          <span className="font-black text-lg">Faiz</span>
+          <span className="font-black text-lg">—</span>
         </div>
         <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-gray-50">
           <span className="font-black uppercase text-gray-500 tracking-wider">Diagnosis</span>
@@ -69,7 +70,7 @@ export default function PatientProfilePage() {
         </div>
         <div className="flex justify-between items-center px-4 py-4 hover:bg-gray-50">
           <span className="font-black uppercase text-gray-500 tracking-wider">Member Since</span>
-          <span className="font-black text-lg">01/04/2026</span>
+          <span className="font-black text-lg">—</span>
         </div>
       </div>
 

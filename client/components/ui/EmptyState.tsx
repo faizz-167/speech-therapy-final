@@ -1,13 +1,30 @@
+import type { ReactNode } from "react";
+import { NeoCard } from "@/components/ui/NeoCard";
+import { NeoButton } from "@/components/ui/NeoButton";
+
 interface EmptyStateProps {
-  message: string;
-  hint?: string;
+  icon?: ReactNode;
+  heading: string;
+  subtext?: string;
+  cta?: {
+    label: string;
+    onClick: () => void;
+  };
 }
 
-export function EmptyState({ message, hint }: EmptyStateProps) {
+export function EmptyState({ icon, heading, subtext, cta }: EmptyStateProps) {
   return (
-    <div className="border-4 border-neo-black bg-white p-6 shadow-neo-sm">
-      <p className="font-black uppercase tracking-wide">{message}</p>
-      {hint && <p className="mt-2 text-sm font-medium text-gray-600">{hint}</p>}
+    <div className="min-h-[32vh] flex items-center justify-center">
+      <NeoCard className="max-w-xl space-y-4 p-8 text-center">
+        {icon ? <div className="text-4xl">{icon}</div> : null}
+        <h2 className="text-2xl font-black uppercase tracking-tight">{heading}</h2>
+        {subtext ? <p className="text-sm font-medium text-gray-600">{subtext}</p> : null}
+        {cta ? (
+          <div className="pt-2">
+            <NeoButton onClick={cta.onClick}>{cta.label}</NeoButton>
+          </div>
+        ) : null}
+      </NeoCard>
     </div>
   );
 }

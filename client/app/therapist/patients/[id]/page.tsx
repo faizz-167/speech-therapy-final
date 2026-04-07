@@ -5,8 +5,11 @@ import { api } from "@/lib/api";
 import { Patient, Defect } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import Link from "next/link";
 
 export default function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -55,9 +58,17 @@ export default function PatientDetailPage() {
     }
   }
 
-  if (loading) return <SkeletonList />;
-  if (error) return <ErrorBanner message={error} />;
-  if (!patient) return null;
+  if (loading) return <LoadingState label="Loading patient details..." />;
+  if (error) return <ErrorState message={error} />;
+  if (!patient) {
+    return (
+      <EmptyState
+        icon="🧑"
+        heading="Patient Not Found"
+        subtext="This patient record is no longer available."
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-up max-w-2xl">
@@ -133,9 +144,9 @@ export default function PatientDetailPage() {
 
       {patient.status === "approved" && (
         <div className="flex gap-3">
-          <a href={`/therapist/patients/${id}/baseline`}><NeoButton variant="ghost">View Baseline</NeoButton></a>
-          <a href={`/therapist/patients/${id}/plan`}><NeoButton>Manage Plan</NeoButton></a>
-          <a href={`/therapist/patients/${id}/progress`}><NeoButton variant="secondary">Progress</NeoButton></a>
+          <Link href={`/therapist/patients/${id}/baseline`}><NeoButton variant="ghost">View Baseline</NeoButton></Link>
+          <Link href={`/therapist/patients/${id}/plan`}><NeoButton>Manage Plan</NeoButton></Link>
+          <Link href={`/therapist/patients/${id}/progress`}><NeoButton variant="secondary">Progress</NeoButton></Link>
         </div>
       )}
     </div>

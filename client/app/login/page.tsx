@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/auth";
 import { NeoInput } from "@/components/ui/NeoInput";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { NeoCard } from "@/components/ui/NeoCard";
+import type { LoginRequest, TokenResponse } from "@/types";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -31,11 +32,9 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await api.post<{ access_token: string; role: string; user_id: string; full_name: string }>(
-        "/auth/login",
-        { email, password }
-      );
-      setAuth(res.access_token, res.role as "therapist" | "patient", res.user_id, res.full_name);
+      const payload: LoginRequest = { email, password };
+      const res = await api.post<TokenResponse>("/auth/login", payload);
+      setAuth(res.access_token, res.role, res.user_id, res.full_name);
       router.push(res.role === "therapist" ? "/therapist/dashboard" : "/patient/home");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");

@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import Link from "next/link";
 import { TherapistDashboard } from "@/types";
 
@@ -15,8 +16,8 @@ export default function DashboardPage() {
     api.get<TherapistDashboard>("/therapist/dashboard").then(setData).catch((e) => setError(e.message));
   }, []);
 
-  if (error) return <ErrorBanner message={error} />;
-  if (!data) return <SkeletonList count={3} />;
+  if (error) return <ErrorState message={error} />;
+  if (!data) return <LoadingState label="Loading dashboard..." />;
 
   return (
     <div className="space-y-10 animate-fade-up p-4 md:p-8 max-w-6xl mx-auto">

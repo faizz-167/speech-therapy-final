@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { cn } from "@/lib/utils";
@@ -17,7 +18,14 @@ export function PatientNav() {
   const router = useRouter();
   const { fullName, clearAuth } = useAuthStore();
 
-  function logout() { clearAuth(); router.push("/login"); }
+  async function logout() {
+    try {
+      await api.post("/auth/logout", {}, { handleAuthFailure: false });
+    } finally {
+      clearAuth();
+      router.push("/login");
+    }
+  }
 
   return (
     <nav className="bg-neo-secondary border-b-4 border-neo-black px-6 py-4 flex items-center justify-between shadow-neo-sm relative z-10 bg-pattern-halftone">
