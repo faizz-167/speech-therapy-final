@@ -38,9 +38,4 @@ export interface HomeData {
   plan_end_date: string | null;
 }
 
-export interface HomeSummary {
-  has_approved_plan: boolean;
-  plan_name: string | null;
-  plan_start_date: string | null;
-  plan_end_date: string | null;
-}
+export type HomeSummary = Pick<HomeData, "has_approved_plan" | "plan_name" | "plan_start_date" | "plan_end_date">;

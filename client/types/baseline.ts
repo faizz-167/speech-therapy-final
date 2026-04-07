@@ -11,6 +11,7 @@ export interface BaselineSection {
   section_id: string;
   section_name: string;
   instructions: string | null;
+  order_index: number;
   items: BaselineItem[];
 }
 
@@ -37,10 +38,3 @@ export interface BaselineResult {
   assessed_on: string;
 }
 
-export interface BaselineCompletionResult {
-  result_id: string;
-  baseline_name: string;
-  raw_score: number;
-  level: string;
-  assessed_on: string;
-}

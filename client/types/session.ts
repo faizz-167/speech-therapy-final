@@ -1,6 +1,6 @@
 export interface Prompt {
   prompt_id: string;
-  prompt_type: "warmup" | "exercise";
+  prompt_type: string;
   task_mode: string;
   instruction: string | null;
   display_content: string | null;
@@ -43,4 +43,4 @@ export interface RecordingMeta {
   speechStartAt: string | null;
 }
 
-export type Phase = "instruction" | "record" | "uploading" | "scoring" | "scored" | "timeout";
+export type SessionPhase = "instruction" | "record" | "uploading" | "scoring" | "scored" | "timeout";

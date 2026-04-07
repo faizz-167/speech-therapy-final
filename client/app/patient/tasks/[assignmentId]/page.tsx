@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
 import { createWebSocket } from "@/lib/ws";
-import { Prompt, PollResult, RecordingMeta, Phase } from "@/types";
+import { Prompt, PollResult, RecordingMeta, SessionPhase } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { Recorder } from "@/components/patient/Recorder";
@@ -16,7 +16,7 @@ export default function ExercisePage() {
   const userId = useAuthStore((s) => s.userId);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [promptIdx, setPromptIdx] = useState(0);
-  const [phase, setPhase] = useState<Phase>("instruction");
+  const [phase, setPhase] = useState<SessionPhase>("instruction");
   const [score, setScore] = useState<Record<string, unknown> | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

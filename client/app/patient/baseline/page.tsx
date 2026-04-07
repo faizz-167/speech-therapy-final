@@ -8,7 +8,7 @@ import {
   BaselineItem,
   BaselineAssessment,
   AttemptResult,
-  BaselineCompletionResult,
+  BaselineResult,
 } from "@/types";
 
 type Phase = "loading" | "ready" | "recording" | "uploading" | "polling" | "scored" | "complete" | "error";
@@ -22,7 +22,7 @@ export default function BaselinePage() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [attemptResult, setAttemptResult] = useState<AttemptResult | null>(null);
   const [completedScores, setCompletedScores] = useState<AttemptResult[]>([]);
-  const [finalResult, setFinalResult] = useState<BaselineCompletionResult | null>(null);
+  const [finalResult, setFinalResult] = useState<BaselineResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -128,7 +128,7 @@ export default function BaselinePage() {
     if (!sessionId) return;
     setPhase("uploading");
     try {
-      const result = await api.post<BaselineCompletionResult>(`/baseline/${sessionId}/complete`, {});
+      const result = await api.post<BaselineResult>(`/baseline/${sessionId}/complete`, {});
       setFinalResult(result);
       setPhase("complete");
     } catch (e: unknown) {
