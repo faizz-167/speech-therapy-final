@@ -4,8 +4,9 @@ import { api } from "@/lib/api";
 import { Assignment, HomeSummary } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { SkeletonList } from "@/components/ui/Skeletons";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import Link from "next/link";
 
 export default function TasksPage() {
@@ -28,7 +29,7 @@ export default function TasksPage() {
   }, []);
 
   if (loading) return <SkeletonList />;
-  if (error) return <ErrorBanner message={error} />;
+  if (error) return <ErrorState message={error} />;
 
   const day = new Date().toLocaleDateString("en-US", {
     weekday: "long",

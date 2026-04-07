@@ -3,8 +3,9 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Patient } from "@/types";
 import { PatientCard } from "@/components/therapist/PatientCard";
-import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { SkeletonList } from "@/components/ui/Skeletons";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorState } from "@/components/ui/ErrorState";
 
 export default function PatientsPage() {
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -19,7 +20,7 @@ export default function PatientsPage() {
   }, []);
 
   if (loading) return <SkeletonList />;
-  if (error) return <ErrorBanner message={error} />;
+  if (error) return <ErrorState message={error} />;
 
   return (
     <div className="space-y-6 animate-fade-up">
