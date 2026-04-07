@@ -108,9 +108,12 @@ export default function PatientDetailPage() {
               <label key={d.defect_id} className="flex items-center gap-2 font-medium cursor-pointer">
                 <input type="checkbox" className="w-4 h-4"
                   checked={selectedDefects.includes(d.defect_id)}
-                  onChange={(e) => setSelectedDefects(prev =>
-                    e.target.checked ? [...prev, d.defect_id] : prev.filter(x => x !== d.defect_id)
-                  )}
+                  onChange={(e) => {
+                    setValidationMsg("");
+                    setSelectedDefects(prev =>
+                      e.target.checked ? [...prev, d.defect_id] : prev.filter(x => x !== d.defect_id)
+                    );
+                  }}
                 />
                 <span>{d.name} <span className="text-xs text-gray-500">({d.category})</span></span>
               </label>

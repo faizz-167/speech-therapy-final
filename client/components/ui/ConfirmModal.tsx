@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+
 interface ConfirmModalProps {
   open: boolean;
   title: string;
@@ -19,10 +21,17 @@ export function ConfirmModal({
   onCancel,
   dangerous = false,
 }: ConfirmModalProps) {
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onCancel]);
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="bg-white border-8 border-neo-black shadow-[8px_8px_0_0_black] p-8 max-w-md w-full mx-4 space-y-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
+      <div className="bg-white border-8 border-neo-black shadow-[8px_8px_0_0_black] p-8 max-w-md w-full mx-4 space-y-6" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-2xl font-black uppercase">{title}</h2>
         <p className="font-medium">{message}</p>
         <div className="flex gap-3">
