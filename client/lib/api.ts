@@ -1,4 +1,13 @@
+import { useAuthStore } from "@/store/auth";
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+export class AuthError extends Error {
+  constructor(message = "Session expired. Please log in again.") {
+    super(message);
+    this.name = "AuthError";
+  }
+}
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -22,6 +31,15 @@ async function request<T>(path: string, init: RequestInit & { timeout?: number }
   if (!(rest.body instanceof FormData)) headers["Content-Type"] = "application/json";
   try {
     const res = await fetch(`${BASE_URL}${path}`, { ...rest, headers, signal: controller.signal });
+    if (res.status === 401 || res.status === 403) {
+      const { clearAuth, setSessionExpired } = useAuthStore.getState();
+      clearAuth();
+      setSessionExpired(true);
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+      throw new AuthError();
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(err.detail ?? "Request failed");

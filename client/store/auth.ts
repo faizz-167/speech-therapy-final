@@ -8,9 +8,11 @@ interface AuthState {
   fullName: string | null;
   hydrated: boolean;
   bootstrapped: boolean;
+  sessionExpired: boolean;
   setAuth: (token: string, role: "therapist" | "patient", userId: string, fullName: string) => void;
   clearAuth: () => void;
   setHydrated: () => void;
+  setSessionExpired: (v: boolean) => void;
   bootstrapAuth: () => Promise<void>;
 }
 
@@ -23,9 +25,11 @@ export const useAuthStore = create<AuthState>()(
       fullName: null,
       hydrated: false,
       bootstrapped: false,
+      sessionExpired: false,
       setAuth: (token, role, userId, fullName) => set({ token, role, userId, fullName }),
-      clearAuth: () => set({ token: null, role: null, userId: null, fullName: null, bootstrapped: false }),
+      clearAuth: () => set({ token: null, role: null, userId: null, fullName: null, bootstrapped: false, sessionExpired: false }),
       setHydrated: () => set({ hydrated: true }),
+      setSessionExpired: (v) => set({ sessionExpired: v }),
       bootstrapAuth: async () => {
         const { token } = get();
         if (!token) {
@@ -57,7 +61,7 @@ export const useAuthStore = create<AuthState>()(
         role: state.role,
         userId: state.userId,
         fullName: state.fullName,
-        // bootstrapped intentionally excluded — re-validated on each app load
+        // bootstrapped and sessionExpired intentionally excluded — re-evaluated on each app load
       }),
     }
   )

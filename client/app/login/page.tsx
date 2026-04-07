@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
@@ -11,10 +11,20 @@ import Link from "next/link";
 export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const sessionExpired = useAuthStore((s) => s.sessionExpired);
+  const setSessionExpired = useAuthStore((s) => s.setSessionExpired);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showExpiredBanner, setShowExpiredBanner] = useState(false);
+
+  useEffect(() => {
+    if (sessionExpired) {
+      setShowExpiredBanner(true);
+      setSessionExpired(false);
+    }
+  }, []); // run once on mount to latch value before it is cleared
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -43,7 +53,7 @@ export default function LoginPage() {
         <div className="absolute -bottom-8 -right-8 w-24 h-24 bg-neo-secondary border-4 border-neo-black rounded-full flex items-center justify-center rotate-[20deg] z-10 shadow-neo-sm">
           <span className="font-black text-xl text-center leading-none">GO<br/>FAST</span>
         </div>
-        
+
         <NeoCard className="relative space-y-8 z-0 bg-white border-8 p-8">
           <div className="text-center space-y-3">
             <h1 className="text-5xl font-black uppercase tracking-tighter text-stroke-black text-white drop-shadow-[4px_4px_0_rgba(0,0,0,1)]">SPEECHPATH</h1>
@@ -51,9 +61,15 @@ export default function LoginPage() {
                <p className="font-black uppercase tracking-widest text-neo-black border-4 border-neo-black px-3 py-1 bg-neo-secondary rotate-2 shadow-neo-sm">Sign in to your account</p>
             </div>
           </div>
-          
+
+          {showExpiredBanner && (
+            <div className="border-4 border-neo-black bg-neo-accent px-6 py-4 font-black uppercase tracking-widest text-sm shadow-neo-sm mb-6">
+              Session expired. Please log in again.
+            </div>
+          )}
+
           {error && <div className="bg-neo-accent border-4 border-neo-black p-4 font-black text-lg uppercase shadow-neo-sm animate-shake">{error}</div>}
-          
+
           <form onSubmit={handleLogin} className="space-y-5">
             <NeoInput label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             <NeoInput label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
@@ -63,7 +79,7 @@ export default function LoginPage() {
               </NeoButton>
             </div>
           </form>
-          
+
           <div className="flex flex-col gap-3 pt-6 border-t-8 border-neo-black mt-6">
             <Link href="/register/therapist" className="font-black uppercase tracking-wide hover:bg-neo-secondary p-2 transition-colors border-2 border-transparent hover:border-neo-black flex justify-between items-center group">
               <span>Register as Therapist</span>
