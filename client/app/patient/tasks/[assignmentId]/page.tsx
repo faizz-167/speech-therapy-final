@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
 import { createWebSocket } from "@/lib/ws";
@@ -13,6 +13,7 @@ import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
 
 export default function ExercisePage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();
+  const router = useRouter();
   const userId = useAuthStore((s) => s.userId);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [promptIdx, setPromptIdx] = useState(0);
@@ -129,7 +130,7 @@ export default function ExercisePage() {
       setAttemptNumber(null);
     } else {
       api.post(`/patient/tasks/${assignmentId}/complete`, {}).then(() => {
-        window.location.href = "/patient/tasks";
+        router.push("/patient/tasks");
       });
     }
   }

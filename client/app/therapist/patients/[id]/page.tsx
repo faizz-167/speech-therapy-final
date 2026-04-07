@@ -1,20 +1,24 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Patient, Defect } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 export default function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [patient, setPatient] = useState<Patient | null>(null);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [selectedDefects, setSelectedDefects] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(false);
+  const [validationMsg, setValidationMsg] = useState("");
+  const [showRejectConfirm, setShowRejectConfirm] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -26,7 +30,8 @@ export default function PatientDetailPage() {
   }, [id]);
 
   async function handleApprove() {
-    if (selectedDefects.length === 0) { alert("Select at least one defect"); return; }
+    if (selectedDefects.length === 0) { setValidationMsg("Select at least one defect"); return; }
+    setValidationMsg("");
     setApproving(true);
     try {
       await api.post(`/therapist/patients/${id}/approve`, { defect_ids: selectedDefects });
@@ -37,11 +42,14 @@ export default function PatientDetailPage() {
     } finally { setApproving(false); }
   }
 
-  async function handleReject() {
-    if (!confirm("Reject and remove this patient?")) return;
+  function handleReject() {
+    setShowRejectConfirm(true);
+  }
+
+  async function doReject() {
     try {
       await api.post(`/therapist/patients/${id}/reject`, {});
-      window.location.href = "/therapist/patients";
+      router.push("/therapist/patients");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
     }
@@ -53,6 +61,16 @@ export default function PatientDetailPage() {
 
   return (
     <div className="space-y-6 animate-fade-up max-w-2xl">
+      <ConfirmModal
+        open={showRejectConfirm}
+        title="Reject Patient"
+        message="Reject and remove this patient? This cannot be undone."
+        confirmLabel="Reject"
+        cancelLabel="Keep"
+        dangerous
+        onConfirm={() => { setShowRejectConfirm(false); doReject(); }}
+        onCancel={() => setShowRejectConfirm(false)}
+      />
       <h1 className="text-3xl font-black uppercase">{patient.full_name}</h1>
       <NeoCard className="space-y-3">
         <div className="grid grid-cols-2 gap-2 text-sm font-medium">
@@ -98,6 +116,9 @@ export default function PatientDetailPage() {
               </label>
             ))}
           </div>
+          {validationMsg && (
+            <p className="text-sm font-bold text-red-600">{validationMsg}</p>
+          )}
           <div className="flex gap-3">
             <NeoButton onClick={handleApprove} disabled={approving} className="flex-1">
               {approving ? "Approving..." : "Approve"}

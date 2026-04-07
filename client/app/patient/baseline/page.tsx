@@ -150,7 +150,7 @@ export default function BaselinePage() {
       <div className="min-h-screen flex items-center justify-center">
         <NeoCard className="p-6 max-w-md w-full">
           <p className="text-red-600 font-semibold mb-4">{error}</p>
-          <NeoButton onClick={() => window.location.reload()}>Try Again</NeoButton>
+          <NeoButton onClick={() => router.refresh()}>Try Again</NeoButton>
         </NeoCard>
       </div>
     );
