@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
@@ -32,9 +33,18 @@ interface AttemptResult {
   asr_transcript: string | null;
 }
 
+interface BaselineCompletionResult {
+  result_id: string;
+  baseline_name: string;
+  raw_score: number;
+  level: string;
+  assessed_on: string;
+}
+
 type Phase = "loading" | "ready" | "recording" | "uploading" | "polling" | "scored" | "complete" | "error";
 
 export default function BaselinePage() {
+  const router = useRouter();
   const [assessments, setAssessments] = useState<BaselineAssessment[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [allItems, setAllItems] = useState<BaselineItem[]>([]);
@@ -42,6 +52,7 @@ export default function BaselinePage() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [attemptResult, setAttemptResult] = useState<AttemptResult | null>(null);
   const [completedScores, setCompletedScores] = useState<AttemptResult[]>([]);
+  const [finalResult, setFinalResult] = useState<BaselineCompletionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -147,7 +158,8 @@ export default function BaselinePage() {
     if (!sessionId) return;
     setPhase("uploading");
     try {
-      await api.post(`/baseline/${sessionId}/complete`, {});
+      const result = await api.post<BaselineCompletionResult>(`/baseline/${sessionId}/complete`, {});
+      setFinalResult(result);
       setPhase("complete");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to complete session");
@@ -178,13 +190,20 @@ export default function BaselinePage() {
     const avg = completedScores.length
       ? Math.round(completedScores.reduce((s, a) => s + (a.computed_score ?? 0), 0) / completedScores.length)
       : 0;
+    const displayScore = finalResult?.raw_score ?? avg;
+    const displayLevel = finalResult?.level ?? null;
     return (
       <div className="min-h-screen flex items-center justify-center">
         <NeoCard className="p-8 max-w-md w-full text-center">
           <h2 className="text-2xl font-bold mb-2">Baseline Complete!</h2>
-          <p className="text-gray-600 mb-4">Average score: <strong>{avg}</strong></p>
-          <NeoButton onClick={() => (window.location.href = "/patient/dashboard")}>
-            Go to Dashboard
+          <p className="text-gray-600 mb-2">Average score: <strong>{displayScore}</strong></p>
+          {displayLevel && (
+            <p className="text-gray-600 mb-4">
+              Starting level: <strong className="capitalize">{displayLevel}</strong>
+            </p>
+          )}
+          <NeoButton onClick={() => router.push("/patient/home")}>
+            Go to Home
           </NeoButton>
         </NeoCard>
       </div>

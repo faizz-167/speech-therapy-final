@@ -143,12 +143,14 @@ async def submit_baseline_attempt(
 ):
     """Upload audio for one baseline item. Queues ML scoring asynchronously."""
     session = await db.get(Session, uuid.UUID(session_id))
-    if not session or session.patient_id != patient.patient_id:
+    if not session or session.patient_id != patient.patient_id or session.session_type != "baseline":
         raise HTTPException(404, "Baseline session not found")
 
     item = await db.get(BaselineItem, item_id)
     if not item:
         raise HTTPException(404, "Baseline item not found")
+    if item.formula_mode in EXCLUDED_FORMULA_MODES:
+        raise HTTPException(400, "This baseline item requires clinician rating")
 
     ext = os.path.splitext(audio.filename or "audio.webm")[1] or ".webm"
     filename = f"baseline_{uuid.uuid4()}{ext}"
@@ -207,7 +209,7 @@ async def complete_baseline_session(
 ):
     """Aggregate all scored baseline attempts into patient_baseline_result and baseline_item_result rows."""
     session = await db.get(Session, uuid.UUID(session_id))
-    if not session or session.patient_id != patient.patient_id:
+    if not session or session.patient_id != patient.patient_id or session.session_type != "baseline":
         raise HTTPException(404, "Baseline session not found")
 
     attempts_result = await db.execute(

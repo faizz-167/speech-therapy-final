@@ -502,6 +502,8 @@ def analyze_attempt(self, attempt_id):
                 level_id, "drop", 0.0, "fail",
             )
             _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
+            if assigned_therapist_id:
+                _create_review_notification(cur, assigned_therapist_id, str(patient_id), str(attempt_id))
             conn.commit()
             r = redis.from_url(settings.redis_url)
             r.publish(
