@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { Patient } from "@/types";
 import { PatientCard } from "@/components/therapist/PatientCard";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export default function PatientsPage() {
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -24,7 +25,7 @@ export default function PatientsPage() {
     <div className="space-y-6 animate-fade-up">
       <h1 className="text-3xl font-black uppercase">Patients</h1>
       {patients.length === 0 ? (
-        <p className="font-bold text-gray-500">No patients yet. Share your therapist code for patients to register.</p>
+        <EmptyState message="No patients yet." hint="Share your therapist code for patients to register." />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {patients.map((p) => <PatientCard key={p.patient_id} patient={p} />)}

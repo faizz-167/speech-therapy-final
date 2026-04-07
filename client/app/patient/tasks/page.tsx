@@ -5,6 +5,7 @@ import { Assignment, HomeSummary } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { SkeletonList, ErrorBanner } from "@/components/ui/Skeletons";
+import { EmptyState } from "@/components/ui/EmptyState";
 import Link from "next/link";
 
 export default function TasksPage() {
@@ -43,14 +44,12 @@ export default function TasksPage() {
       </div>
 
       {tasks.length === 0 ? (
-        <NeoCard>
-          <p className="font-bold">No tasks scheduled for today.</p>
-          {homeSummary?.has_approved_plan && (
-            <p className="mt-2 text-sm font-medium text-gray-600">
-              Your current plan, {homeSummary.plan_name}, runs from {homeSummary.plan_start_date} to {homeSummary.plan_end_date}.
-            </p>
-          )}
-        </NeoCard>
+        <EmptyState
+          message="No tasks scheduled for today."
+          hint={homeSummary?.has_approved_plan
+            ? `Your plan "${homeSummary.plan_name}" runs from ${homeSummary.plan_start_date} to ${homeSummary.plan_end_date}.`
+            : undefined}
+        />
       ) : (
         <div className="space-y-4">
           {tasks.map((t) => (

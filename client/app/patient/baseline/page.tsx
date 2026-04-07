@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import {
   BaselineItem,
   BaselineAssessment,
@@ -138,22 +140,11 @@ export default function BaselinePage() {
   };
 
   if (phase === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-lg font-medium">Loading baseline exercises…</p>
-      </div>
-    );
+    return <LoadingState message="Loading baseline exercises…" />;
   }
 
   if (phase === "error") {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <NeoCard className="p-6 max-w-md w-full">
-          <p className="text-red-600 font-semibold mb-4">{error}</p>
-          <NeoButton onClick={() => router.refresh()}>Try Again</NeoButton>
-        </NeoCard>
-      </div>
-    );
+    return <ErrorState message={error ?? "An error occurred"} onRetry={() => router.refresh()} />;
   }
 
   if (phase === "complete") {
