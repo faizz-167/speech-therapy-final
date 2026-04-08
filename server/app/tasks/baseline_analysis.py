@@ -48,12 +48,12 @@ def _baseline_score(formula_mode: str, pa: float, wa: float, fs: float,
 @celery_app.task(name="app.tasks.baseline_analysis.analyze_baseline_attempt", bind=True, max_retries=2)
 def analyze_baseline_attempt(self, attempt_id: str):
     """Score a baseline audio attempt and update the baseline_attempt row."""
-    from app.ml.whisper_asr import transcribe
-    from app.ml.hubert_phoneme import align_phonemes
-    from app.ml.spacy_disfluency import score_disfluency
-
     conn = None
     try:
+        from app.ml.whisper_asr import transcribe
+        from app.ml.hubert_phoneme import align_phonemes
+        from app.ml.spacy_disfluency import score_disfluency
+
         conn = _get_conn()
         cur = conn.cursor()
 
@@ -117,6 +117,20 @@ def analyze_baseline_attempt(self, attempt_id: str):
         )
         conn.commit()
 
+    except RuntimeError as exc:
+        try:
+            if conn is None or conn.closed:
+                conn = _get_conn()
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE baseline_attempt SET result='failed', asr_transcript=%s WHERE attempt_id=%s",
+                (str(exc), attempt_id),
+            )
+            conn.commit()
+        finally:
+            if conn is not None and not conn.closed:
+                conn.close()
+        raise
     except Exception as exc:
         try:
             if conn is not None and not conn.closed:

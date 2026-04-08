@@ -1,11 +1,13 @@
 import asyncio
 import json
 import os
+import app.models  # noqa: F401
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 from app.auth import COOKIE_NAME, decode_token
 from app.config import settings
+from app.database import Base, engine
 from app.routers import auth, therapist, plans, patient, baseline, session, progress
 
 os.makedirs(settings.upload_dir, exist_ok=True)
@@ -27,6 +29,12 @@ app.include_router(patient.router, prefix="/patient", tags=["patient"])
 app.include_router(baseline.router, prefix="/baseline", tags=["baseline"])
 app.include_router(session.router, prefix="/session", tags=["session"])
 app.include_router(progress.router, prefix="", tags=["progress"])
+
+
+@app.on_event("startup")
+async def ensure_schema_tables() -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 @app.get("/health")
 async def health():

@@ -38,9 +38,11 @@ export default function TherapistPatientProgressPage() {
   }
 
   const levelColors: Record<string, string> = {
-    easy: "bg-green-100 border-green-700 text-green-800",
-    medium: "bg-yellow-100 border-yellow-700 text-yellow-800",
+    beginner: "bg-green-100 border-green-700 text-green-800",
+    elementary: "bg-lime-100 border-lime-700 text-lime-800",
+    intermediate: "bg-yellow-100 border-yellow-700 text-yellow-800",
     advanced: "bg-red-100 border-red-700 text-red-800",
+    expert: "bg-purple-100 border-purple-700 text-purple-800",
   };
 
   return (

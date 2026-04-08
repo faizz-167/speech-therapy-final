@@ -1,12 +1,24 @@
-import whisper
-import torch
 from functools import lru_cache
+import warnings
 
 
 @lru_cache(maxsize=1)
 def _load_model():
+    try:
+        import torch
+        import whisper
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Whisper ASR dependency is not installed. Install 'openai-whisper' in the server environment."
+        ) from exc
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    return whisper.load_model("small", device=device)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*torch\.load.*weights_only=False.*",
+            category=FutureWarning,
+        )
+        return whisper.load_model("small", device=device)
 
 
 def transcribe(audio_path: str, expected_text: str | None = None) -> dict:

@@ -1,10 +1,11 @@
+from datetime import date
 from pydantic import BaseModel
 from typing import Optional
 
 
 class GeneratePlanRequest(BaseModel):
     patient_id: str
-    baseline_level: str = "easy"
+    baseline_level: str = "beginner"
 
 
 class AssignmentOut(BaseModel):
@@ -20,8 +21,8 @@ class AssignmentOut(BaseModel):
 class PlanOut(BaseModel):
     plan_id: str
     plan_name: str
-    start_date: str | None
-    end_date: str | None
+    start_date: date | None
+    end_date: date | None
     status: str
     goals: str | None
     assignments: list[AssignmentOut]

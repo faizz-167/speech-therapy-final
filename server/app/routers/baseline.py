@@ -32,9 +32,9 @@ EXCLUDED_FORMULA_MODES = {"clinician_rated"}
 def score_to_level(score: float) -> str:
     if score >= 80:
         return "advanced"
-    elif score >= 70:
-        return "medium"
-    return "easy"
+    if score >= 70:
+        return "intermediate"
+    return "beginner"
 
 
 @router.get("/exercises", response_model=list[BaselineAssessmentOut])
@@ -239,7 +239,20 @@ async def complete_baseline_session(
         float(a.computed_score) for a in scored_attempts if a.computed_score is not None
     ) / len(scored_attempts)
     raw_score = int(round(avg_score))
-    severity = "advanced" if avg_score >= 80 else ("medium" if avg_score >= 70 else "easy")
+    severity = score_to_level(avg_score)
+
+    previous_results_result = await db.execute(
+        select(PatientBaselineResult).where(PatientBaselineResult.patient_id == patient.patient_id)
+    )
+    previous_results = previous_results_result.scalars().all()
+    for previous_result in previous_results:
+        previous_items_result = await db.execute(
+            select(BaselineItemResult).where(BaselineItemResult.result_id == previous_result.result_id)
+        )
+        for previous_item in previous_items_result.scalars().all():
+            await db.delete(previous_item)
+        await db.delete(previous_result)
+    await db.flush()
 
     result_id = uuid.uuid4()
     baseline_result = PatientBaselineResult(
@@ -269,7 +282,7 @@ async def complete_baseline_session(
         baseline_name=assessment.name if assessment else primary_baseline_id,
         raw_score=raw_score,
         level=severity,
-        assessed_on=date.today().isoformat(),
+        assessed_on=date.today(),
     )
 
 
@@ -282,8 +295,9 @@ async def get_baseline_result(
         select(PatientBaselineResult)
         .where(PatientBaselineResult.patient_id == patient.patient_id)
         .order_by(PatientBaselineResult.assessed_on.desc())
+        .limit(1)
     )
-    br = result.scalar_one_or_none()
+    br = result.scalars().first()
     if not br:
         return None
     assessment = await db.get(BaselineAssessment, br.baseline_id)
@@ -309,8 +323,9 @@ async def therapist_get_baseline(
         select(PatientBaselineResult)
         .where(PatientBaselineResult.patient_id == patient_id)
         .order_by(PatientBaselineResult.assessed_on.desc())
+        .limit(1)
     )
-    br = result.scalar_one_or_none()
+    br = result.scalars().first()
     if not br:
         return None
     assessment = await db.get(BaselineAssessment, br.baseline_id)
@@ -340,7 +355,7 @@ async def therapist_get_baseline_items(
         .order_by(PatientBaselineResult.assessed_on.desc())
         .limit(1)
     )
-    baseline_result = result_result.scalar_one_or_none()
+    baseline_result = result_result.scalars().first()
     if not baseline_result:
         return []
 

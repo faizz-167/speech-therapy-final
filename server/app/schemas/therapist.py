@@ -1,3 +1,4 @@
+from datetime import date
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
@@ -24,7 +25,7 @@ class PatientListItem(BaseModel):
     full_name: str
     email: str
     status: str
-    date_of_birth: str
+    date_of_birth: date
     gender: Optional[str]
     pre_assigned_defect_ids: Optional[dict]
     created_at: str

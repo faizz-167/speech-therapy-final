@@ -7,7 +7,7 @@ celery_app = Celery(
     "speechpath",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.analysis"],
+    include=["app.tasks.analysis", "app.tasks.baseline_analysis"],
 )
 
 celery_config = {

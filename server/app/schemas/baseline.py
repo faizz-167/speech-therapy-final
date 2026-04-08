@@ -1,3 +1,4 @@
+from datetime import date
 from pydantic import BaseModel
 from typing import Optional
 
@@ -45,7 +46,7 @@ class BaselineResultOut(BaseModel):
     baseline_name: str
     raw_score: int
     level: str
-    assessed_on: str
+    assessed_on: date
 
 
 class BaselineItemDetailOut(BaseModel):

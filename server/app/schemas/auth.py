@@ -16,7 +16,7 @@ class PatientRegister(BaseModel):
     full_name: str
     email: EmailStr
     password: str
-    date_of_birth: str          # ISO date string e.g. "2000-01-15"
+    date_of_birth: date
     gender: str | None = None
     therapist_code: str
 

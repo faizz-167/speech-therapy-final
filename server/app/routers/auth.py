@@ -130,6 +130,7 @@ async def login(
 @router.get("/me", response_model=MeResponse)
 async def me(
     token: Annotated[str, Depends(get_request_token)],
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     payload = decode_token(token)
@@ -154,6 +155,9 @@ async def me(
         patient = result.scalar_one_or_none()
         if not patient:
             raise HTTPException(404, "Patient not found")
+        if patient.status != PatientStatus.approved:
+            clear_auth_cookie(response)
+            raise HTTPException(403, "Account pending therapist approval")
         return MeResponse(
             user_id=str(patient.patient_id),
             email=patient.email,

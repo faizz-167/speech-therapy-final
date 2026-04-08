@@ -214,7 +214,7 @@ def _upsert_patient_task_progress(
     # Get or create the progress row
     cur.execute(
         "SELECT progress_id, current_level_id, consecutive_passes, consecutive_fails,"
-        " overall_accuracy, total_attempts"
+        " overall_accuracy, total_attempts, sessions_at_level"
         " FROM patient_task_progress"
         " WHERE patient_id = %s AND task_id = %s",
         (patient_id, task_id),
@@ -225,7 +225,7 @@ def _upsert_patient_task_progress(
     new_level_id = current_level_id or (ordered_levels[0] if ordered_levels else None)
 
     if prog:
-        progress_id, cur_level, cons_pass, cons_fail, overall_acc, total_att = prog
+        progress_id, cur_level, cons_pass, cons_fail, overall_acc, total_att, sessions_at_level = prog
         new_cons_pass = (cons_pass or 0) + 1 if is_pass else 0
         new_cons_fail = (cons_fail or 0) + 1 if not is_pass else 0
         new_total = (total_att or 0) + 1
@@ -241,14 +241,26 @@ def _upsert_patient_task_progress(
             idx = min(idx + 1, len(ordered_levels) - 1)
         elif adaptive_decision == "drop":
             idx = max(idx - 1, 0)
+        previous_level_id = effective_level
         new_level_id = ordered_levels[idx]
+        new_sessions_at_level = 1 if new_level_id != previous_level_id else int(sessions_at_level or 0) + 1
 
         cur.execute(
             "UPDATE patient_task_progress"
             " SET current_level_id=%s, consecutive_passes=%s, consecutive_fails=%s,"
-            " overall_accuracy=%s, last_final_score=%s, total_attempts=%s, last_attempted_at=NOW()"
+            " overall_accuracy=%s, last_final_score=%s, total_attempts=%s,"
+            " sessions_at_level=%s, last_attempted_at=NOW()"
             " WHERE progress_id=%s",
-            (new_level_id, new_cons_pass, new_cons_fail, new_acc, round(final_score, 2), new_total, progress_id),
+            (
+                new_level_id,
+                new_cons_pass,
+                new_cons_fail,
+                new_acc,
+                round(final_score, 2),
+                new_total,
+                new_sessions_at_level,
+                progress_id,
+            ),
         )
     else:
         import uuid as _uuid
@@ -258,10 +270,10 @@ def _upsert_patient_task_progress(
         cur.execute(
             "INSERT INTO patient_task_progress"
             " (progress_id, patient_id, task_id, current_level_id, consecutive_passes, consecutive_fails,"
-            " overall_accuracy, last_final_score, total_attempts, last_attempted_at)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1,NOW())",
+            " overall_accuracy, last_final_score, total_attempts, sessions_at_level, last_attempted_at)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,1,%s,NOW())",
             (new_progress_id, patient_id, task_id, new_level_id,
-             new_cons_pass, new_cons_fail, round(final_score, 2), round(final_score, 2)),
+             new_cons_pass, new_cons_fail, round(final_score, 2), round(final_score, 2), 1),
         )
 
 
@@ -333,14 +345,14 @@ def _create_review_notification(cur, therapist_id: str, patient_id: str, attempt
 
 @celery_app.task(name="app.tasks.analysis.analyze_attempt", bind=True, max_retries=2)
 def analyze_attempt(self, attempt_id):
-    # Lazy ML imports — only loaded when the worker actually runs the task
-    from app.ml.whisper_asr import transcribe
-    from app.ml.hubert_phoneme import align_phonemes
-    from app.ml.spacy_disfluency import score_disfluency
-    from app.ml.speechbrain_emotion import classify_emotion
-
     conn = None
     try:
+        # Lazy ML imports — only loaded when the worker actually runs the task
+        from app.ml.whisper_asr import transcribe
+        from app.ml.hubert_phoneme import align_phonemes
+        from app.ml.spacy_disfluency import score_disfluency
+        from app.ml.speechbrain_emotion import classify_emotion
+
         conn = _get_conn()
         cur = conn.cursor()
 
@@ -614,6 +626,20 @@ def analyze_attempt(self, attempt_id):
             )),
         )
 
+    except RuntimeError as exc:
+        try:
+            if conn is None or conn.closed:
+                conn = _get_conn()
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE session_prompt_attempt SET result=%s, asr_transcript=%s WHERE attempt_id=%s",
+                ("fail", str(exc), attempt_id),
+            )
+            conn.commit()
+        finally:
+            if conn is not None and not conn.closed:
+                conn.close()
+        raise
     except Exception as exc:
         try:
             if conn is not None and not conn.closed:

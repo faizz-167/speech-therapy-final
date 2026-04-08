@@ -15,6 +15,19 @@ from app.schemas.patient import TaskAssignmentOut, PromptOut, PatientProfileOut
 router = APIRouter()
 
 
+def _normalize_task_level_name(level: str | None) -> str:
+    normalized = (level or "").strip().lower()
+    return {
+        "easy": "beginner",
+        "medium": "intermediate",
+        "advanced": "advanced",
+        "beginner": "beginner",
+        "elementary": "elementary",
+        "intermediate": "intermediate",
+        "expert": "expert",
+    }.get(normalized, "beginner")
+
+
 @router.get("/profile", response_model=PatientProfileOut)
 async def get_profile(
     patient: Annotated[Patient, Depends(require_patient)],
@@ -60,7 +73,9 @@ async def patient_home(
     db: AsyncSession = Depends(get_db),
 ):
     baseline_result = await db.execute(
-        select(PatientBaselineResult).where(PatientBaselineResult.patient_id == patient.patient_id)
+        select(PatientBaselineResult.result_id)
+        .where(PatientBaselineResult.patient_id == patient.patient_id)
+        .limit(1)
     )
     has_baseline = baseline_result.scalar_one_or_none() is not None
 
@@ -138,6 +153,7 @@ async def get_today_tasks(
             task_mode=task.task_mode if task else "",
             day_index=a.day_index,
             status=a.status,
+            priority_order=a.priority_order,
             current_level=current_level,
         ))
     return out
@@ -161,7 +177,7 @@ async def get_prompts(
     if not task:
         raise HTTPException(404, "Task not found")
 
-    target_level_name = "easy"
+    target_level_name = "beginner"
     progress_result = await db.execute(
         select(PatientTaskProgress).where(
             PatientTaskProgress.patient_id == patient.patient_id,
@@ -181,7 +197,7 @@ async def get_prompts(
         )
         baseline = baseline_result.scalars().first()
         if baseline and baseline.severity_rating:
-            target_level_name = baseline.severity_rating
+            target_level_name = _normalize_task_level_name(baseline.severity_rating)
 
     level_result = await db.execute(
         select(TaskLevel).where(
@@ -194,7 +210,7 @@ async def get_prompts(
         fallback_result = await db.execute(
             select(TaskLevel).where(
                 TaskLevel.task_id == task.task_id,
-                cast(TaskLevel.level_name, String) == "easy",
+                cast(TaskLevel.level_name, String) == "beginner",
             )
         )
         level = fallback_result.scalar_one_or_none()

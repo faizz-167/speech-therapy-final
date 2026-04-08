@@ -1,3 +1,4 @@
+from datetime import date
 from pydantic import BaseModel
 from typing import Optional
 
@@ -12,7 +13,7 @@ class PatientProfileOut(BaseModel):
     patient_id: str
     full_name: str
     email: str
-    date_of_birth: str
+    date_of_birth: date
     gender: Optional[str]
     status: str
     current_streak: int
@@ -40,4 +41,5 @@ class TaskAssignmentOut(BaseModel):
     task_mode: str
     day_index: Optional[int]
     status: str
+    priority_order: Optional[int] = None
     current_level: Optional[str] = None
