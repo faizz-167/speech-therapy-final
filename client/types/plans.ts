@@ -6,6 +6,7 @@ export interface Assignment {
   day_index: number | null;
   status: string;
   priority_order: number | null;
+  current_level?: string | null;
 }
 
 export interface Plan {

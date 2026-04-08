@@ -41,6 +41,12 @@ export default function TherapistPatientProgressPage() {
     );
   }
 
+  const levelColors: Record<string, string> = {
+    easy: "bg-green-100 border-green-700 text-green-800",
+    medium: "bg-yellow-100 border-yellow-700 text-yellow-800",
+    advanced: "bg-red-100 border-red-700 text-red-800",
+  };
+
   return (
     <div className="space-y-6 animate-fade-up">
       <h1 className="text-2xl font-black uppercase">Patient Progress</h1>
@@ -60,6 +66,18 @@ export default function TherapistPatientProgressPage() {
         </NeoCard>
       </div>
 
+      {data.dominant_emotion && (
+        <NeoCard accent="accent" className="flex items-center gap-4">
+          <div className="text-3xl">😶</div>
+          <div>
+            <p className="font-black uppercase text-sm">Emotion &amp; Engagement</p>
+            <p className="text-xs font-medium text-gray-600">
+              Dominant emotion: <span className="font-black uppercase">{data.dominant_emotion}</span>
+            </p>
+          </div>
+        </NeoCard>
+      )}
+
       {data.weekly_trend.length > 0 && (
         <NeoCard className="space-y-3">
           <h2 className="font-black uppercase">Weekly Trend</h2>
@@ -77,17 +95,31 @@ export default function TherapistPatientProgressPage() {
 
       <div className="space-y-3">
         <h2 className="font-black uppercase">Task Breakdown</h2>
-        {data.task_metrics.map((t) => (
-          <NeoCard key={t.task_name} className="flex items-center justify-between">
-            <div>
-              <p className="font-black uppercase text-sm">{t.task_name}</p>
-              <p className="text-xs font-medium text-gray-500">
-                {t.total_attempts} attempts · Level: {t.current_level ?? "—"}
-              </p>
-            </div>
-            <div className="text-2xl font-black">{t.overall_accuracy.toFixed(0)}%</div>
-          </NeoCard>
-        ))}
+        {data.task_metrics.map((t) => {
+          const levelKey = (t.current_level ?? "").toLowerCase();
+          const levelClass = levelColors[levelKey] ?? "bg-gray-100 border-gray-400 text-gray-700";
+          const trend = t.last_attempt_result === "pass" ? "↑" : t.last_attempt_result === "fail" ? "↓" : null;
+          const trendColor = t.last_attempt_result === "pass" ? "text-green-700" : "text-red-600";
+          return (
+            <NeoCard key={t.task_id} className="flex items-center justify-between">
+              <div className="flex-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <p className="font-black uppercase text-sm">{t.task_name}</p>
+                  {trend && <span className={`font-black text-lg ${trendColor}`}>{trend}</span>}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-xs font-medium text-gray-500">{t.total_attempts} attempts</p>
+                  {t.current_level && (
+                    <span className={`border-2 px-2 py-0.5 text-xs font-black uppercase ${levelClass}`}>
+                      {t.current_level}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="text-2xl font-black">{t.overall_accuracy.toFixed(0)}%</div>
+            </NeoCard>
+          );
+        })}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
@@ -13,6 +13,8 @@ import { LoadingState } from "@/components/ui/LoadingState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 
+const NO_SPEECH_REASON = "No speech detected";
+
 export default function ExercisePage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();
   const router = useRouter();
@@ -25,9 +27,13 @@ export default function ExercisePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [attemptNumber, setAttemptNumber] = useState<number | null>(null);
+  const [noSpeech, setNoSpeech] = useState(false);
+
   const wsRef = useRef<WebSocket | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track the current attempt_id so WS events from previous attempts are ignored
+  const currentAttemptIdRef = useRef<string | null>(null);
 
   const currentPrompt = prompts[promptIdx];
 
@@ -50,8 +56,24 @@ export default function ExercisePage() {
     const timer = window.setTimeout(() => {
       if (cancelled) return;
       wsRef.current = createWebSocket(userId, (data) => {
-        setScore(data);
-        setPhase("scored");
+        // Only accept score events that match the currently active attempt
+        if (!currentAttemptIdRef.current || data.attempt_id !== currentAttemptIdRef.current) return;
+        if (pollIntervalRef.current !== null) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+        if (pollTimeoutRef.current !== null) {
+          clearTimeout(pollTimeoutRef.current);
+          pollTimeoutRef.current = null;
+        }
+        if (data.fail_reason === NO_SPEECH_REASON) {
+          setNoSpeech(true);
+          setPhase("scored");
+        } else {
+          setNoSpeech(false);
+          setScore(data);
+          setPhase("scored");
+        }
       });
     }, 0);
 
@@ -71,6 +93,18 @@ export default function ExercisePage() {
     };
   }, [userId]);
 
+  function clearAttemptTracking() {
+    if (pollIntervalRef.current !== null) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (pollTimeoutRef.current !== null) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+    currentAttemptIdRef.current = null;
+  }
+
   function playTTS() {
     if (!currentPrompt?.instruction) {
       setPhase("record");
@@ -84,6 +118,7 @@ export default function ExercisePage() {
   async function handleRecording(blob: Blob, meta: RecordingMeta) {
     if (!sessionId || !currentPrompt) return;
     setPhase("uploading");
+    setNoSpeech(false);
     const form = new FormData();
     form.append("audio", blob, "recording.webm");
     form.append("prompt_id", currentPrompt.prompt_id);
@@ -98,38 +133,56 @@ export default function ExercisePage() {
         `/session/${sessionId}/attempt`,
         form
       );
+      currentAttemptIdRef.current = res.attempt_id;
       setAttemptNumber(res.attempt_number);
       setPhase("scoring");
+
       pollIntervalRef.current = setInterval(async () => {
-        const poll = await api.get<PollResult>(`/session/attempt/${res.attempt_id}`);
-        if (poll.result && poll.result !== "pending" && poll.score) {
-          setScore(poll.score);
-          setPhase("scored");
-          if (pollIntervalRef.current !== null) {
-            clearInterval(pollIntervalRef.current);
-            pollIntervalRef.current = null;
+        try {
+          const poll = await api.get<PollResult>(`/session/attempt/${res.attempt_id}`);
+          if (poll.result && poll.result !== "pending") {
+            clearAttemptTracking();
+            if (poll.score?.fail_reason === NO_SPEECH_REASON) {
+              setNoSpeech(true);
+              setPhase("scored");
+            } else if (poll.score) {
+              setNoSpeech(false);
+              setScore(poll.score);
+              setPhase("scored");
+            }
           }
+        } catch {
+          // Keep the poll fallback alive until timeout or a WS event wins.
         }
-      }, 3000);
+      }, 2000);
+
       pollTimeoutRef.current = setTimeout(() => {
-        if (pollIntervalRef.current !== null) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-        }
+        clearAttemptTracking();
         setPhase((p) => (p === "scoring" ? "timeout" : p));
-      }, 45000);
+      }, 60000);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Upload failed");
-      setPhase("record");
+      clearAttemptTracking();
+      setError(e instanceof Error ? e.message : "Upload failed. Please try again.");
+      setPhase("error");
     }
   }
 
+  function retryAfterNoSpeech() {
+    clearAttemptTracking();
+    setNoSpeech(false);
+    setScore(null);
+    setAttemptNumber(null);
+    setPhase("instruction");
+  }
+
   function nextPrompt() {
+    clearAttemptTracking();
+    setNoSpeech(false);
+    setScore(null);
+    setAttemptNumber(null);
     if (promptIdx < prompts.length - 1) {
       setPromptIdx((i) => i + 1);
       setPhase("instruction");
-      setScore(null);
-      setAttemptNumber(null);
     } else {
       api.post(`/patient/tasks/${assignmentId}/complete`, {}).then(() => {
         router.push("/patient/tasks");
@@ -138,7 +191,38 @@ export default function ExercisePage() {
   }
 
   if (loading) return <LoadingState label="Loading exercise..." />;
-  if (error) return <ErrorState message={error} />;
+  if (phase === "timeout") {
+    return (
+      <ErrorState
+        message="Analysis timed out. Please try this prompt again."
+        onRetry={() => {
+          setError("");
+          setNoSpeech(false);
+          setScore(null);
+          setAttemptNumber(null);
+          setPhase("record");
+        }}
+      />
+    );
+  }
+  if (error) {
+    return (
+      <ErrorState
+        message={error}
+        onRetry={
+          prompts.length > 0
+            ? () => {
+                setError("");
+                setNoSpeech(false);
+                setScore(null);
+                setAttemptNumber(null);
+                setPhase("record");
+              }
+            : () => router.refresh()
+        }
+      />
+    );
+  }
   if (!currentPrompt) {
     return (
       <EmptyState
@@ -150,10 +234,19 @@ export default function ExercisePage() {
     );
   }
 
+  const isWarmup = currentPrompt.prompt_type === "warmup";
+
   return (
     <div className="space-y-6 animate-fade-up max-w-2xl">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-black uppercase">Exercise</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-black uppercase">Exercise</h1>
+          {isWarmup && (
+            <span className="bg-neo-secondary border-2 border-neo-black px-2 py-0.5 text-xs font-black uppercase">
+              Warm-up
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           {attemptNumber ? (
             <span className="font-bold text-sm border-4 border-black px-3 py-1">
@@ -217,17 +310,21 @@ export default function ExercisePage() {
         </NeoCard>
       )}
 
-      {phase === "timeout" && (
-        <NeoCard className="text-center py-8 space-y-4">
-          <p className="font-black text-lg">Analysis is taking longer than expected.</p>
-          <p className="text-sm font-medium text-gray-500">The result will appear here once ready.</p>
-          <NeoButton variant="ghost" onClick={() => setPhase("record")}>
-            Try again
+      {phase === "scored" && noSpeech && (
+        <NeoCard accent="accent" className="text-center py-8 space-y-4">
+          <div className="text-5xl">🎙️</div>
+          <p className="font-black text-xl uppercase">No Speech Detected</p>
+          <p className="text-sm font-medium text-gray-600">
+            We couldn&apos;t hear you clearly. Make sure your microphone is working and speak
+            directly into it when prompted.
+          </p>
+          <NeoButton onClick={retryAfterNoSpeech} className="w-full">
+            Try Again
           </NeoButton>
         </NeoCard>
       )}
 
-      {phase === "scored" && score && (
+      {phase === "scored" && !noSpeech && score && (
         <>
           <ScoreDisplay score={score} />
           <NeoButton className="w-full" onClick={nextPrompt}>

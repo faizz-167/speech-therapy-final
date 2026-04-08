@@ -18,6 +18,7 @@ export default function PlanPage() {
   const [error, setError] = useState("");
   const [generating, setGenerating] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [mutationState, setMutationState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
 
   async function loadPlan() {
     try {
@@ -65,51 +66,69 @@ export default function PlanPage() {
     }
   }
 
+  async function withMutationFeedback(fn: () => Promise<void>) {
+    setMutationState("saving");
+    try {
+      await fn();
+      setMutationState("saved");
+      setTimeout(() => setMutationState("idle"), 2000);
+    } catch (e: unknown) {
+      setMutationState("failed");
+      setError(e instanceof Error ? e.message : "Operation failed");
+    }
+  }
+
   async function handleMove(assignmentId: string, newDayIndex: number) {
     if (!plan) return;
-    await api.patch(`/plans/${plan.plan_id}/tasks/${assignmentId}`, {
-      day_index: newDayIndex,
+    await withMutationFeedback(async () => {
+      await api.patch(`/plans/${plan.plan_id}/tasks/${assignmentId}`, {
+        day_index: newDayIndex,
+      });
+      setPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              assignments: prev.assignments.map((a) =>
+                a.assignment_id === assignmentId
+                  ? { ...a, day_index: newDayIndex }
+                  : a
+              ),
+            }
+          : prev
+      );
     });
-    setPlan((prev) =>
-      prev
-        ? {
-            ...prev,
-            assignments: prev.assignments.map((a) =>
-              a.assignment_id === assignmentId
-                ? { ...a, day_index: newDayIndex }
-                : a
-            ),
-          }
-        : prev
-    );
   }
 
   async function handleAdd(taskId: string, dayIndex: number) {
     if (!plan) return;
-    const newAssignment = await api.post<Assignment>(
-      `/plans/${plan.plan_id}/tasks`,
-      { task_id: taskId, day_index: dayIndex }
-    );
-    setPlan((prev) =>
-      prev
-        ? { ...prev, assignments: [...prev.assignments, newAssignment] }
-        : prev
-    );
+    await withMutationFeedback(async () => {
+      const newAssignment = await api.post<Assignment>(
+        `/plans/${plan.plan_id}/tasks`,
+        { task_id: taskId, day_index: dayIndex }
+      );
+      setPlan((prev) =>
+        prev
+          ? { ...prev, assignments: [...prev.assignments, newAssignment] }
+          : prev
+      );
+    });
   }
 
   async function handleDelete(assignmentId: string) {
     if (!plan) return;
-    await api.delete(`/plans/${plan.plan_id}/tasks/${assignmentId}`);
-    setPlan((prev) =>
-      prev
-        ? {
-            ...prev,
-            assignments: prev.assignments.filter(
-              (a) => a.assignment_id !== assignmentId
-            ),
-          }
-        : prev
-    );
+    await withMutationFeedback(async () => {
+      await api.delete(`/plans/${plan.plan_id}/tasks/${assignmentId}`);
+      setPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              assignments: prev.assignments.filter(
+                (a) => a.assignment_id !== assignmentId
+              ),
+            }
+          : prev
+      );
+    });
   }
 
   async function handleApprove() {
@@ -154,18 +173,29 @@ export default function PlanPage() {
                 <div className="font-bold tracking-widest text-sm mt-3 uppercase">
                   {plan.start_date ?? "TBD"} — {plan.end_date ?? "TBD"}
                 </div>
+                {plan.goals && (
+                  <p className="text-sm font-medium mt-2 text-gray-700 max-w-lg">{plan.goals}</p>
+                )}
              </div>
-             
-             <div className="flex flex-wrap gap-2 mt-4 md:mt-0">
+
+             <div className="flex flex-wrap gap-2 mt-4 md:mt-0 items-center">
+                 {mutationState === "saving" && (
+                   <span className="text-xs font-bold uppercase tracking-widest text-gray-500 border-2 border-gray-300 px-3 py-2">Saving...</span>
+                 )}
+                 {mutationState === "saved" && (
+                   <span className="text-xs font-bold uppercase tracking-widest text-green-700 border-2 border-green-700 px-3 py-2">Saved ✓</span>
+                 )}
+                 {mutationState === "failed" && (
+                   <span className="text-xs font-bold uppercase tracking-widest text-red-700 border-2 border-red-700 px-3 py-2">Save Failed</span>
+                 )}
                  {plan.status === "approved" && <span className="bg-neo-primary border-4 border-neo-black px-4 py-2 font-black uppercase text-sm shadow-neo-sm text-neo-black flex items-center tracking-widest">APPROVED</span>}
                  {plan.status === "draft" && <NeoButton onClick={handleApprove} disabled={approving} className="shadow-neo-sm bg-neo-primary text-neo-black tracking-widest hover:text-white">{approving ? "APPROVING..." : "APPROVE PLAN"}</NeoButton>}
                  <NeoButton variant="secondary" onClick={handleGenerate} disabled={generating} className="bg-neo-warning text-neo-black tracking-widest shadow-neo-sm hover:bg-neo-black hover:text-neo-warning transition-colors">
                     {generating ? "GENERATING..." : "🔄 REGENERATE"}
                  </NeoButton>
-                 <NeoButton className="bg-neo-accent text-neo-black shadow-neo-sm hover:text-white tracking-widest">🗑 DELETE PLAN</NeoButton>
              </div>
           </div>
-          
+
           <div className="bg-neo-primary/40 border-4 border-neo-black px-4 py-3 font-bold text-sm shadow-neo-sm -rotate-1 mb-8">
              {plan.status === "approved" ? "This plan is approved and visible to the patient. You can still drag tasks between days, add new tasks, or remove tasks at any time." : "This plan is a draft. The patient cannot see it until you approve it."}
           </div>

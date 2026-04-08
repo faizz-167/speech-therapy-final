@@ -5,10 +5,13 @@ export interface WeeklyPoint {
 }
 
 export interface TaskMetric {
+  task_id: string;
   task_name: string;
   overall_accuracy: number;
   total_attempts: number;
   current_level: string | null;
+  pass_rate: number;
+  last_attempt_result: string | null;
 }
 
 export interface Progress {

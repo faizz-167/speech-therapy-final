@@ -109,6 +109,17 @@ async def get_today_tasks(
     out = []
     for a in assignments:
         task = await db.get(Task, a.task_id)
+        progress_result = await db.execute(
+            select(PatientTaskProgress).where(
+                PatientTaskProgress.patient_id == patient.patient_id,
+                PatientTaskProgress.task_id == a.task_id,
+            )
+        )
+        progress = progress_result.scalar_one_or_none()
+        current_level = None
+        if progress and progress.current_level_id:
+            level = await db.get(TaskLevel, progress.current_level_id)
+            current_level = level.level_name if level else None
         out.append(TaskAssignmentOut(
             assignment_id=str(a.assignment_id),
             task_id=a.task_id,
@@ -116,6 +127,7 @@ async def get_today_tasks(
             task_mode=task.task_mode if task else "",
             day_index=a.day_index,
             status=a.status,
+            current_level=current_level,
         ))
     return out
 

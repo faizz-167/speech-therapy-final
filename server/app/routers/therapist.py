@@ -111,6 +111,12 @@ async def approve_patient(
     patient = result.scalar_one_or_none()
     if not patient:
         raise HTTPException(404, "Patient not found")
+    defect_result = await db.execute(
+        select(Defect.defect_id).where(Defect.defect_id.in_(body.defect_ids))
+    )
+    valid_defect_ids = {row[0] for row in defect_result.all()}
+    if len(valid_defect_ids) != len(set(body.defect_ids)):
+        raise HTTPException(400, "One or more selected defects are invalid")
     patient.status = PatientStatus.approved
     patient.pre_assigned_defect_ids = {"defect_ids": body.defect_ids}
     patient.primary_diagnosis = body.primary_diagnosis

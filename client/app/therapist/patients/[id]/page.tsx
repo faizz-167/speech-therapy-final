@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { Patient, Defect } from "@/types";
+import { Patient, Defect, ApproveRequest } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { LoadingState } from "@/components/ui/LoadingState";
@@ -17,7 +17,10 @@ export default function PatientDetailPage() {
   const [patient, setPatient] = useState<Patient | null>(null);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [selectedDefects, setSelectedDefects] = useState<string[]>([]);
+  const [primaryDiagnosis, setPrimaryDiagnosis] = useState("");
+  const [clinicalNotes, setClinicalNotes] = useState("");
   const [error, setError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(false);
   const [validationMsg, setValidationMsg] = useState("");
@@ -37,9 +40,13 @@ export default function PatientDetailPage() {
     setValidationMsg("");
     setApproving(true);
     try {
-      await api.post(`/therapist/patients/${id}/approve`, { defect_ids: selectedDefects });
+      const body: ApproveRequest = { defect_ids: selectedDefects };
+      if (primaryDiagnosis.trim()) body.primary_diagnosis = primaryDiagnosis.trim();
+      if (clinicalNotes.trim()) body.clinical_notes = clinicalNotes.trim();
+      await api.post(`/therapist/patients/${id}/approve`, body);
       const updated = await api.get<Patient>(`/therapist/patients/${id}`);
       setPatient(updated);
+      setSuccessMsg("Patient approved successfully.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally { setApproving(false); }
@@ -110,6 +117,12 @@ export default function PatientDetailPage() {
         })()}
       </NeoCard>
 
+      {successMsg && (
+        <div className="border-4 border-green-700 bg-green-50 px-4 py-3 font-bold text-green-800 text-sm">
+          {successMsg}
+        </div>
+      )}
+
       {patient.status === "pending" && (
         <NeoCard accent="secondary" className="space-y-4">
           <h2 className="font-black uppercase">Approve Patient</h2>
@@ -130,6 +143,29 @@ export default function PatientDetailPage() {
               </label>
             ))}
           </div>
+
+          <div className="space-y-1">
+            <label className="font-black uppercase text-xs">Primary Diagnosis</label>
+            <input
+              type="text"
+              value={primaryDiagnosis}
+              onChange={(e) => setPrimaryDiagnosis(e.target.value)}
+              placeholder="e.g. Articulation Disorder"
+              className="w-full border-4 border-black px-3 py-2 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-neo-accent"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="font-black uppercase text-xs">Clinical Notes <span className="text-gray-500 font-medium normal-case">(optional)</span></label>
+            <textarea
+              value={clinicalNotes}
+              onChange={(e) => setClinicalNotes(e.target.value)}
+              placeholder="Any relevant clinical observations..."
+              rows={3}
+              className="w-full border-4 border-black px-3 py-2 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-neo-accent resize-none"
+            />
+          </div>
+
           {validationMsg && (
             <p className="text-sm font-bold text-red-600">{validationMsg}</p>
           )}

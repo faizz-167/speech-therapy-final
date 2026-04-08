@@ -9,10 +9,13 @@ class WeeklyPoint(BaseModel):
 
 
 class TaskMetric(BaseModel):
+    task_id: str
     task_name: str
     overall_accuracy: float
     total_attempts: int
     current_level: Optional[str]
+    pass_rate: float
+    last_attempt_result: Optional[str]
 
 
 class ProgressResponse(BaseModel):

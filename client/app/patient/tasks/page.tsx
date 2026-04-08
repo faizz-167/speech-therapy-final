@@ -31,6 +31,8 @@ export default function TasksPage() {
   if (loading) return <LoadingState label="Loading your tasks..." />;
   if (error) return <ErrorState message={error} />;
 
+  const allCompleted = tasks.length > 0 && tasks.every((t) => t.status === "completed");
+
   const day = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
@@ -44,15 +46,23 @@ export default function TasksPage() {
         <p className="font-bold text-gray-600">{day}</p>
       </div>
 
-      {tasks.length === 0 ? (
+      {allCompleted ? (
+        <EmptyState
+          icon="🎉"
+          heading="All Done for Today!"
+          subtext="You've finished all tasks for today. Great work — check back tomorrow!"
+        />
+      ) : tasks.length === 0 && !homeSummary?.has_approved_plan ? (
+        <EmptyState
+          icon="📋"
+          heading="No Plan Yet"
+          subtext="Your therapist hasn't approved a plan yet. Check back soon."
+        />
+      ) : tasks.length === 0 ? (
         <EmptyState
           icon="📭"
-          heading="No Tasks Scheduled"
-          subtext={
-            homeSummary?.has_approved_plan
-              ? `Your plan "${homeSummary.plan_name}" runs from ${homeSummary.plan_start_date} to ${homeSummary.plan_end_date}.`
-              : "Your therapist has not scheduled tasks for today."
-          }
+          heading="No Tasks Today"
+          subtext="No tasks are scheduled for today — check back tomorrow."
         />
       ) : (
         <div className="space-y-4">
@@ -60,14 +70,21 @@ export default function TasksPage() {
             <NeoCard key={t.assignment_id} className="flex items-center justify-between">
               <div>
                 <p className="font-black uppercase">{t.task_name}</p>
-                <p className="text-sm font-medium text-gray-500">{t.task_mode}</p>
-                <span
-                  className={`text-xs font-black uppercase border-2 border-black px-2 py-0.5 ${
-                    t.status === "completed" ? "bg-[#FFD93D]" : "bg-white"
-                  }`}
-                >
-                  {t.status}
-                </span>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-gray-500">{t.task_mode}</p>
+                  {t.current_level ? (
+                    <span className="bg-neo-secondary text-xs font-black uppercase border-2 border-black px-2 py-0.5">
+                      {t.current_level}
+                    </span>
+                  ) : null}
+                  <span
+                    className={`text-xs font-black uppercase border-2 border-black px-2 py-0.5 ${
+                      t.status === "completed" ? "bg-[#FFD93D]" : "bg-white"
+                    }`}
+                  >
+                    {t.status}
+                  </span>
+                </div>
               </div>
               {t.status !== "completed" && (
                 <Link href={`/patient/tasks/${t.assignment_id}`}>

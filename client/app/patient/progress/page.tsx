@@ -18,6 +18,12 @@ import {
 } from "recharts";
 import { Progress } from "@/types";
 
+const LEVEL_COLORS: Record<string, string> = {
+  easy: "bg-neo-accent",
+  medium: "bg-neo-secondary",
+  advanced: "bg-neo-warning",
+};
+
 export default function ProgressPage() {
   const [data, setData] = useState<Progress | null>(null);
   const [error, setError] = useState("");
@@ -45,6 +51,7 @@ export default function ProgressPage() {
     <div className="space-y-6 animate-fade-up">
       <h1 className="text-3xl font-black uppercase">My Progress</h1>
 
+      {/* Summary stat cards */}
       <div className="grid grid-cols-3 gap-4">
         <NeoCard accent="secondary" className="text-center">
           <div className="text-3xl font-black">{data.total_attempts}</div>
@@ -60,6 +67,7 @@ export default function ProgressPage() {
         </NeoCard>
       </div>
 
+      {/* Weekly trend chart */}
       {data.weekly_trend.length > 0 && (
         <NeoCard className="space-y-3">
           <h2 className="font-black uppercase">Weekly Score Trend</h2>
@@ -81,6 +89,7 @@ export default function ProgressPage() {
         </NeoCard>
       )}
 
+      {/* Task performance chart */}
       {data.task_metrics.length > 0 && (
         <NeoCard className="space-y-3">
           <h2 className="font-black uppercase">Task Performance</h2>
@@ -96,6 +105,76 @@ export default function ProgressPage() {
         </NeoCard>
       )}
 
+      {/* Per-task cards */}
+      {data.task_metrics.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="text-2xl font-black uppercase">My Tasks</h2>
+          {data.task_metrics.map((m) => {
+            const levelColor = LEVEL_COLORS[m.current_level ?? ""] ?? "bg-white";
+            return (
+              <NeoCard key={m.task_id} className="p-5 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <p className="font-black uppercase text-lg leading-tight">{m.task_name}</p>
+                  {m.current_level && (
+                    <span
+                      className={`${levelColor} border-4 border-neo-black px-3 py-1 font-black uppercase text-xs tracking-widest shrink-0`}
+                    >
+                      {m.current_level}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3">
+                  <div className="border-4 border-neo-black p-2 text-center">
+                    <p className="font-black text-xl">{m.total_attempts}</p>
+                    <p className="font-black uppercase text-xs text-gray-500">Attempts</p>
+                  </div>
+                  <div className="border-4 border-neo-black p-2 text-center">
+                    <p className="font-black text-xl">{m.overall_accuracy.toFixed(1)}%</p>
+                    <p className="font-black uppercase text-xs text-gray-500">Accuracy</p>
+                  </div>
+                  <div className="border-4 border-neo-black p-2 text-center">
+                    <p className="font-black text-xl">{m.pass_rate.toFixed(0)}%</p>
+                    <p className="font-black uppercase text-xs text-gray-500">Pass Rate</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t-4 border-neo-black pt-3">
+                  <p className="text-xs font-black uppercase tracking-widest text-gray-500">Last Attempt</p>
+                  <span className="border-2 border-neo-black px-2 py-1 text-xs font-black uppercase">
+                    {m.last_attempt_result ?? "—"}
+                  </span>
+                </div>
+              </NeoCard>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Adaptive progression explanation */}
+      <NeoCard className="space-y-4">
+        <h2 className="font-black uppercase">How Your Level Changes</h2>
+        <div className="grid grid-cols-3 gap-3 text-center text-sm">
+          <div className="border-4 border-neo-black bg-neo-secondary p-3 space-y-1">
+            <p className="text-2xl font-black">⬆</p>
+            <p className="font-black uppercase text-xs">Level Up</p>
+            <p className="font-bold">Score ≥ 75</p>
+          </div>
+          <div className="border-4 border-neo-black bg-white p-3 space-y-1">
+            <p className="text-2xl font-black">→</p>
+            <p className="font-black uppercase text-xs">Stay</p>
+            <p className="font-bold">Score 55–74</p>
+          </div>
+          <div className="border-4 border-neo-black bg-neo-accent p-3 space-y-1">
+            <p className="text-2xl font-black">⬇</p>
+            <p className="font-black uppercase text-xs">Level Down</p>
+            <p className="font-bold">Score &lt; 55</p>
+          </div>
+        </div>
+        <p className="text-xs font-medium text-gray-500">
+          Levels: <strong>Easy → Medium → Advanced</strong>. Your level adjusts after each attempt to keep the challenge appropriate.
+        </p>
+      </NeoCard>
+
+      {/* Dominant emotion */}
       {data.dominant_emotion && (
         <NeoCard accent="muted" className="space-y-1">
           <p className="font-black uppercase text-sm">Most Common Emotion</p>

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 
@@ -23,9 +23,35 @@ class PatientListItem(BaseModel):
 
 
 class ApprovePatientRequest(BaseModel):
-    defect_ids: list[str]
-    primary_diagnosis: Optional[str] = None
-    clinical_notes: Optional[str] = None
+    defect_ids: list[str] = Field(min_length=1)
+    primary_diagnosis: Optional[str] = Field(default=None, max_length=200)
+    clinical_notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("defect_ids")
+    @classmethod
+    def validate_defect_ids(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for defect_id in value:
+            normalized = defect_id.strip()
+            if not normalized:
+                raise ValueError("defect_ids cannot contain blank values")
+            if normalized not in seen:
+                seen.add(normalized)
+                cleaned.append(normalized)
+        if not cleaned:
+            raise ValueError("At least one defect must be selected")
+        return cleaned
+
+    @field_validator("primary_diagnosis", "clinical_notes", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
 
 
 class DashboardResponse(BaseModel):

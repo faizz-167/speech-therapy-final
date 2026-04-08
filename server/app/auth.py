@@ -19,6 +19,11 @@ bearer_scheme = HTTPBearer(auto_error=False)
 COOKIE_NAME = "speechpath_token"
 
 
+def _use_secure_cookies() -> bool:
+    localhost_markers = ("http://localhost", "http://127.0.0.1")
+    return not any(origin.startswith(localhost_markers) for origin in settings.cors_origins)
+
+
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
@@ -49,7 +54,7 @@ def set_auth_cookie(response: Response, token: str) -> None:
         key=COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=False,
+        secure=_use_secure_cookies(),
         samesite="lax",
         max_age=settings.access_token_expire_minutes * 60,
         path="/",

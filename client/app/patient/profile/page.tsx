@@ -41,7 +41,7 @@ export default function PatientProfilePage() {
           <div className="font-black uppercase tracking-widest text-sm border-t-4 border-neo-black pt-2">Current Streak</div>
         </div>
         <div className="bg-neo-secondary border-4 border-neo-black p-4 text-center shadow-neo-sm hover:-translate-y-1 transition-transform">
-          <div className="text-4xl font-black pb-2">⭐ {profile.current_streak}</div>
+          <div className="text-4xl font-black pb-2">⭐ —</div>
           <div className="font-black uppercase tracking-widest text-sm border-t-4 border-neo-black pt-2">Best Streak</div>
         </div>
       </div>

@@ -40,4 +40,4 @@ export interface RecordingMeta {
   speechStartAt: string | null;
 }
 
-export type SessionPhase = "instruction" | "record" | "uploading" | "scoring" | "scored" | "timeout";
+export type SessionPhase = "instruction" | "record" | "uploading" | "scoring" | "scored" | "timeout" | "error";

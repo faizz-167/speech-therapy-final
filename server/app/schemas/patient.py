@@ -19,3 +19,4 @@ class TaskAssignmentOut(BaseModel):
     task_mode: str
     day_index: Optional[int]
     status: str
+    current_level: Optional[str] = None

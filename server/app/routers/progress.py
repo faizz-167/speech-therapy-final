@@ -6,7 +6,7 @@ from app.database import get_db
 from app.auth import require_patient, require_therapist
 from app.models.users import Patient, Therapist
 from app.models.scoring import Session, SessionPromptAttempt, AttemptScoreDetail, PatientTaskProgress
-from app.models.content import Task, TaskLevel
+from app.models.content import Prompt, Task, TaskLevel
 from app.schemas.progress import ProgressResponse, WeeklyPoint, TaskMetric
 
 router = APIRouter()
@@ -14,11 +14,13 @@ router = APIRouter()
 
 async def _build_progress(patient_id: str, db: AsyncSession) -> ProgressResponse:
     result = await db.execute(
-        select(AttemptScoreDetail, SessionPromptAttempt)
+        select(AttemptScoreDetail, SessionPromptAttempt, TaskLevel.task_id)
         .join(SessionPromptAttempt, AttemptScoreDetail.attempt_id == SessionPromptAttempt.attempt_id)
+        .join(Prompt, SessionPromptAttempt.prompt_id == Prompt.prompt_id)
+        .join(TaskLevel, Prompt.level_id == TaskLevel.level_id)
         .join(Session, SessionPromptAttempt.session_id == Session.session_id)
         .where(Session.patient_id == patient_id)
-        .order_by(Session.session_date.desc())
+        .order_by(SessionPromptAttempt.created_at.desc())
     )
     rows = result.fetchall()
 
@@ -51,6 +53,19 @@ async def _build_progress(patient_id: str, db: AsyncSession) -> ProgressResponse
         for k, v in sorted(weekly.items())[-8:]
     ]
 
+    task_rollups: dict[str, dict[str, float | int | str | None]] = {}
+    for r in rows:
+        task_id = r.task_id
+        rollup = task_rollups.setdefault(
+            task_id,
+            {"total": 0, "passes": 0, "last_result": None},
+        )
+        rollup["total"] = int(rollup["total"] or 0) + 1
+        if r.AttemptScoreDetail.pass_fail == "pass":
+            rollup["passes"] = int(rollup["passes"] or 0) + 1
+        if rollup["last_result"] is None:
+            rollup["last_result"] = r.AttemptScoreDetail.pass_fail
+
     progress_result = await db.execute(
         select(PatientTaskProgress).where(PatientTaskProgress.patient_id == patient_id)
     )
@@ -59,12 +74,18 @@ async def _build_progress(patient_id: str, db: AsyncSession) -> ProgressResponse
     for pr in progress_rows:
         task = await db.get(Task, pr.task_id)
         level = await db.get(TaskLevel, pr.current_level_id) if pr.current_level_id else None
+        rollup = task_rollups.get(pr.task_id, {})
+        total = int(rollup.get("total", pr.total_attempts) or 0)
+        passes_for_task = int(rollup.get("passes", 0) or 0)
         task_metrics.append(
             TaskMetric(
+                task_id=pr.task_id,
                 task_name=task.name if task else pr.task_id,
                 overall_accuracy=float(pr.overall_accuracy or 0),
                 total_attempts=pr.total_attempts,
                 current_level=level.level_name if level else None,
+                pass_rate=round((passes_for_task / total) * 100, 2) if total else 0,
+                last_attempt_result=rollup.get("last_result"),
             )
         )
 

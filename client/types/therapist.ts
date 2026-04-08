@@ -28,3 +28,9 @@ export interface TherapistDashboard {
   approved_patients: number;
   pending_patients: number;
 }
+
+export interface ApproveRequest {
+  defect_ids: string[];
+  primary_diagnosis?: string;
+  clinical_notes?: string;
+}
