@@ -111,11 +111,11 @@ export default function PatientDetailPage() {
           if (assignedDefectsList.length === 0) return null;
           return (
             <div className="border-t-4 border-black pt-3 space-y-2">
-              <p className="font-black uppercase text-xs text-gray-500">Assigned Conditions</p>
+              <p className="font-black uppercase text-xs text-neo-black/70">Assigned Conditions</p>
               <div className="flex flex-wrap gap-2">
                 {assignedDefectsList.map(d => (
                   <span key={d.defect_id} className="border-2 border-black px-3 py-1 text-sm font-bold bg-[#FFD93D]">
-                    {d.name} <span className="text-xs font-medium text-gray-600">({d.category})</span>
+                    {d.name} <span className="text-xs font-medium text-neo-black/70">({d.category})</span>
                   </span>
                 ))}
               </div>
@@ -140,7 +140,7 @@ export default function PatientDetailPage() {
                     );
                   }}
                 />
-                <span>{d.name} <span className="text-xs text-gray-500">({d.category})</span></span>
+                <span>{d.name} <span className="text-xs text-neo-black/70">({d.category})</span></span>
               </label>
             ))}
           </div>
@@ -158,7 +158,7 @@ export default function PatientDetailPage() {
           </div>
 
           <div className="space-y-1">
-            <label htmlFor="clinical-notes" className="font-black uppercase text-xs">Clinical Notes <span className="text-gray-500 font-medium normal-case">(optional)</span></label>
+            <label htmlFor="clinical-notes" className="font-black uppercase text-xs">Clinical Notes <span className="text-neo-black/70 font-medium normal-case">(optional)</span></label>
             <textarea
               id="clinical-notes"
               value={clinicalNotes}

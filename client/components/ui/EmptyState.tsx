@@ -18,7 +18,7 @@ export function EmptyState({ icon, heading, subtext, cta }: EmptyStateProps) {
       <NeoCard className="max-w-xl space-y-4 p-8 text-center">
         {icon ? <div className="text-4xl">{icon}</div> : null}
         <h2 className="text-2xl font-black uppercase tracking-tight">{heading}</h2>
-        {subtext ? <p className="text-sm font-medium text-gray-600">{subtext}</p> : null}
+        {subtext ? <p className="text-sm font-medium text-neo-black/70">{subtext}</p> : null}
         {cta ? (
           <div className="pt-2">
             <NeoButton onClick={cta.onClick}>{cta.label}</NeoButton>

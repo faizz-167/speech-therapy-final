@@ -52,7 +52,7 @@ export default function DashboardPage() {
           <NeoCard className="flex items-center justify-between">
             <div>
               <p className="font-black uppercase text-sm tracking-widest">Pending Approvals</p>
-              <p className="text-xs font-medium text-gray-500 mt-1">Patients waiting to be approved</p>
+              <p className="text-xs font-medium text-neo-black/70 mt-1">Patients waiting to be approved</p>
             </div>
             <div className="flex items-center gap-4">
               <span className="text-4xl font-black">{data.pending_patients}</span>
@@ -65,7 +65,7 @@ export default function DashboardPage() {
           <NeoCard className="flex items-center justify-between">
             <div>
               <p className="font-black uppercase text-sm tracking-widest">Without Baseline</p>
-              <p className="text-xs font-medium text-gray-500 mt-1">Approved patients yet to complete baseline</p>
+              <p className="text-xs font-medium text-neo-black/70 mt-1">Approved patients yet to complete baseline</p>
             </div>
             <div className="flex items-center gap-4">
               <span className="text-4xl font-black">{data.patients_without_baseline}</span>
@@ -78,7 +78,7 @@ export default function DashboardPage() {
           <NeoCard className="flex items-center justify-between">
             <div>
               <p className="font-black uppercase text-sm tracking-widest">No Approved Plan</p>
-              <p className="text-xs font-medium text-gray-500 mt-1">Approved patients with no approved therapy plan</p>
+              <p className="text-xs font-medium text-neo-black/70 mt-1">Approved patients with no approved therapy plan</p>
             </div>
             <div className="flex items-center gap-4">
               <span className="text-4xl font-black">{data.patients_without_approved_plan}</span>
@@ -91,7 +91,7 @@ export default function DashboardPage() {
           <NeoCard className="flex items-center justify-between">
             <div>
               <p className="font-black uppercase text-sm tracking-widest">Plans Pending Approval</p>
-              <p className="text-xs font-medium text-gray-500 mt-1">Draft plans awaiting therapist approval</p>
+              <p className="text-xs font-medium text-neo-black/70 mt-1">Draft plans awaiting therapist approval</p>
             </div>
             <div className="flex items-center gap-4">
               <span className="text-4xl font-black">{data.plans_pending_approval}</span>

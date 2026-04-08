@@ -38,7 +38,7 @@ export default function TasksPage() {
     <div className="space-y-6 animate-fade-up">
       <div>
         <h1 className="text-3xl font-black uppercase">Today&apos;s Tasks</h1>
-        <p className="font-bold text-gray-600">{day}</p>
+        <p className="font-bold text-neo-black/70">{day}</p>
       </div>
 
       {allCompleted ? (
@@ -66,7 +66,7 @@ export default function TasksPage() {
               <div>
                 <p className="font-black uppercase">{t.task_name}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-medium text-gray-500">{t.task_mode}</p>
+                  <p className="text-sm font-medium text-neo-black/70">{t.task_mode}</p>
                   {t.current_level ? (
                     <span className="bg-neo-secondary text-xs font-black uppercase border-2 border-black px-2 py-0.5">
                       {t.current_level}

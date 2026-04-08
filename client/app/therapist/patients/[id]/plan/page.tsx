@@ -127,13 +127,13 @@ export default function PlanPage() {
                   {plan.start_date ?? "TBD"} — {plan.end_date ?? "TBD"}
                 </div>
                 {plan.goals && (
-                  <p className="text-sm font-medium mt-2 text-gray-700 max-w-lg">{plan.goals}</p>
+                  <p className="text-sm font-medium mt-2 text-neo-black/80 max-w-lg">{plan.goals}</p>
                 )}
              </div>
 
              <div className="flex flex-wrap gap-2 mt-4 md:mt-0 items-center">
                  {mutationState === "saving" && (
-                   <span className="text-xs font-bold uppercase tracking-widest text-gray-500 border-2 border-gray-300 px-3 py-2">Saving...</span>
+                   <span className="text-xs font-bold uppercase tracking-widest text-neo-black/70 border-2 border-gray-300 px-3 py-2">Saving...</span>
                  )}
                  {plan.status === "approved" && <span className="bg-neo-primary border-4 border-neo-black px-4 py-2 font-black uppercase text-sm shadow-neo-sm text-neo-black flex items-center tracking-widest">APPROVED</span>}
                  {plan.status === "draft" && <NeoButton onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending} className="shadow-neo-sm bg-neo-primary text-neo-black tracking-widest hover:text-white">{approveMutation.isPending ? "APPROVING..." : "APPROVE PLAN"}</NeoButton>}
@@ -169,8 +169,8 @@ export default function PlanPage() {
                     <div key={entry.id} className="flex items-start gap-3 border-b-2 border-gray-200 pb-2 last:border-0">
                       <span className="border-2 border-neo-black px-2 py-0.5 text-xs font-black uppercase bg-neo-muted whitespace-nowrap">{entry.action}</span>
                       <div className="flex-1 min-w-0">
-                        {entry.change_summary && <p className="text-xs font-medium text-gray-700 truncate">{entry.change_summary}</p>}
-                        <p className="text-xs text-gray-400">{new Date(entry.created_at).toLocaleString()}</p>
+                        {entry.change_summary && <p className="text-xs font-medium text-neo-black/80 truncate">{entry.change_summary}</p>}
+                        <p className="text-xs text-neo-black/60">{new Date(entry.created_at).toLocaleString()}</p>
                       </div>
                     </div>
                   ))}

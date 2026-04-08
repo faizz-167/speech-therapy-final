@@ -9,7 +9,7 @@ export function PatientCard({ patient }: { patient: Patient }) {
       <div className="flex items-start justify-between">
         <div>
           <h3 className="font-black text-lg uppercase">{patient.full_name}</h3>
-          <p className="text-sm font-medium text-gray-600">{patient.email}</p>
+          <p className="text-sm font-medium text-neo-black/70">{patient.email}</p>
         </div>
         <span className={`px-2 py-1 text-xs font-black border-2 border-black uppercase ${
           patient.status === "approved" ? "bg-[#FFD93D]" : "bg-[#C4B5FD]"

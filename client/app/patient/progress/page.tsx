@@ -121,19 +121,19 @@ export default function ProgressPage() {
                 <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3">
                   <div className="border-4 border-neo-black p-2 text-center">
                     <p className="font-black text-xl">{m.total_attempts}</p>
-                    <p className="font-black uppercase text-xs text-gray-500">Attempts</p>
+                    <p className="font-black uppercase text-xs text-neo-black/70">Attempts</p>
                   </div>
                   <div className="border-4 border-neo-black p-2 text-center">
                     <p className="font-black text-xl">{m.overall_accuracy.toFixed(1)}%</p>
-                    <p className="font-black uppercase text-xs text-gray-500">Accuracy</p>
+                    <p className="font-black uppercase text-xs text-neo-black/70">Accuracy</p>
                   </div>
                   <div className="border-4 border-neo-black p-2 text-center">
                     <p className="font-black text-xl">{m.pass_rate.toFixed(0)}%</p>
-                    <p className="font-black uppercase text-xs text-gray-500">Pass Rate</p>
+                    <p className="font-black uppercase text-xs text-neo-black/70">Pass Rate</p>
                   </div>
                 </div>
                 <div className="flex items-center justify-between gap-3 border-t-4 border-neo-black pt-3">
-                  <p className="text-xs font-black uppercase tracking-widest text-gray-500">Last Attempt</p>
+                  <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Last Attempt</p>
                   <span className="border-2 border-neo-black px-2 py-1 text-xs font-black uppercase">
                     {m.last_attempt_result ?? "—"}
                   </span>
@@ -164,7 +164,7 @@ export default function ProgressPage() {
             <p className="font-bold">Score &lt; 55</p>
           </div>
         </div>
-        <p className="text-xs font-medium text-gray-500">
+        <p className="text-xs font-medium text-neo-black/70">
           Levels: <strong>Easy → Medium → Advanced</strong>. Your level adjusts after each attempt to keep the challenge appropriate.
         </p>
       </NeoCard>

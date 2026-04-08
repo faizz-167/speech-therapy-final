@@ -26,6 +26,16 @@ def _as_float(value, default: float = 0.0) -> float:
         return default
 
 
+def _compute_speech_rate_score(wpm: float, ideal_min: int = 80, ideal_max: int = 120, tolerance: int = 20) -> float:
+    if ideal_min <= wpm <= ideal_max:
+        return 100.0
+    if wpm < ideal_min:
+        diff = ideal_min - wpm
+        return max(0.0, 100.0 - (diff / tolerance) * 30)
+    diff = wpm - ideal_max
+    return max(0.0, 100.0 - (diff / tolerance) * 30)
+
+
 def _baseline_score(formula_mode: str, pa: float, wa: float, fs: float,
                     wpm: float, formula_weights: dict | None, wpm_range: dict | None) -> float:
     """Compute a 0–100 baseline score according to formula_mode."""
@@ -53,6 +63,7 @@ def analyze_baseline_attempt(self, attempt_id: str):
         from app.ml.whisper_asr import transcribe
         from app.ml.hubert_phoneme import align_phonemes
         from app.ml.spacy_disfluency import score_disfluency
+        from app.ml.speechbrain_emotion import classify_emotion
 
         conn = _get_conn()
         cur = conn.cursor()
@@ -89,10 +100,15 @@ def analyze_baseline_attempt(self, attempt_id: str):
 
         phoneme_result = align_phonemes(audio_path, transcript)
         disfluency_result = score_disfluency(transcript, duration)
+        emotion_result = classify_emotion(audio_path)
 
         pa = _as_float(phoneme_result["phoneme_accuracy"], 70.0)
         fs = _as_float(disfluency_result["fluency_score"], 50.0)
         wpm = _as_float((len(transcript.split()) / duration * 60) if duration > 0 else 0)
+        speech_rate_score = _compute_speech_rate_score(wpm)
+        dominant_emotion = emotion_result.get("dominant_emotion") or "neutral"
+        emotion_score = _as_float(emotion_result.get("emotion_score"), 60.0)
+        engagement_score = _as_float(emotion_result.get("engagement_score"), 60.0)
 
         wa = 75.0
         if expected_output and transcript:
@@ -109,11 +125,24 @@ def analyze_baseline_attempt(self, attempt_id: str):
         cur.execute(
             "UPDATE baseline_attempt"
             " SET result='scored', ml_phoneme_accuracy=%s, ml_word_accuracy=%s,"
-            " ml_fluency_score=%s, ml_speech_rate_wpm=%s, ml_confidence=%s,"
+            " ml_fluency_score=%s, ml_speech_rate_wpm=%s, ml_speech_rate_score=%s,"
+            " ml_confidence=%s, dominant_emotion=%s, emotion_score=%s, engagement_score=%s,"
             " asr_transcript=%s, computed_score=%s"
             " WHERE attempt_id=%s",
-            (pa, wa, fs, wpm_int, round(avg_confidence * 100, 2),
-             transcript, computed, attempt_id),
+            (
+                pa,
+                wa,
+                fs,
+                wpm_int,
+                round(speech_rate_score, 2),
+                round(avg_confidence * 100, 2),
+                dominant_emotion,
+                emotion_score,
+                engagement_score,
+                transcript,
+                computed,
+                attempt_id,
+            ),
         )
         conn.commit()
 

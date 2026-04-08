@@ -30,7 +30,15 @@ export interface AttemptResult {
   attempt_id: string;
   result: string;
   computed_score: number | null;
+  word_accuracy: number | null;
   phoneme_accuracy: number | null;
+  fluency_score: number | null;
+  speech_rate_wpm: number | null;
+  speech_rate_score: number | null;
+  confidence_score: number | null;
+  engagement_score: number | null;
+  dominant_emotion: string | null;
+  pass_fail: string | null;
   asr_transcript: string | null;
 }
 
@@ -46,8 +54,14 @@ export interface BaselineItemDetail {
   item_id: string;
   prompt_text: string | null;
   transcript: string | null;
+  word_accuracy: number | null;
   phoneme_accuracy: number | null;
   fluency_score: number | null;
+  speech_rate_wpm: number | null;
+  speech_rate_score: number | null;
+  confidence_score: number | null;
+  engagement_score: number | null;
+  dominant_emotion: string | null;
   final_score: number;
   pass_fail: boolean;
   created_at: string;

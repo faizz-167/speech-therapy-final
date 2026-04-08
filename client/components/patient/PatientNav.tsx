@@ -1,10 +1,13 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { NeoButton } from "@/components/ui/NeoButton";
+import { NotificationPanel } from "@/components/patient/NotificationPanel";
 import { cn } from "@/lib/utils";
+import type { PatientNotification } from "@/types/patient";
 
 const links = [
   { href: "/patient/home", label: "Home" },
@@ -17,6 +20,35 @@ export function PatientNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { fullName, clearAuth } = useAuthStore();
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const bellRef = useRef<HTMLDivElement>(null);
+
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const data = await api.get<PatientNotification[]>("/patient/notifications?unread_only=true");
+      setUnreadCount(data.length);
+    } catch {
+      // Ignore polling failures.
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchUnreadCount();
+    const interval = setInterval(fetchUnreadCount, 60_000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadCount]);
+
+  useEffect(() => {
+    if (!panelOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (bellRef.current && !bellRef.current.contains(event.target as Node)) {
+        setPanelOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [panelOpen]);
 
   async function logout() {
     try {
@@ -45,6 +77,28 @@ export function PatientNav() {
         </div>
       </div>
       <div className="flex items-center gap-6">
+        <div ref={bellRef} className="relative">
+          <button
+            onClick={() => setPanelOpen((open) => !open)}
+            aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ""}`}
+            aria-expanded={panelOpen}
+            aria-haspopup="dialog"
+            className="relative w-10 h-10 flex items-center justify-center border-4 border-neo-black bg-white shadow-neo-sm hover:bg-neo-muted transition-colors focus:outline-none focus:ring-2 focus:ring-neo-black"
+          >
+            <span className="text-lg" aria-hidden="true">🔔</span>
+            {unreadCount > 0 && (
+              <span className="absolute -top-2 -right-2 min-w-[20px] h-5 flex items-center justify-center bg-neo-accent border-2 border-neo-black text-neo-black text-xs font-black px-1 rounded-none">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
+          </button>
+          {panelOpen && (
+            <NotificationPanel
+              onClose={() => setPanelOpen(false)}
+              onUnreadCountChange={setUnreadCount}
+            />
+          )}
+        </div>
         <span className="font-bold text-base px-3 py-1 bg-white border-4 border-neo-black shadow-neo-sm -rotate-1">{fullName}</span>
         <NeoButton size="sm" variant="primary" onClick={logout} className="rotate-1">Logout</NeoButton>
       </div>

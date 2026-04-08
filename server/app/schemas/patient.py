@@ -34,6 +34,25 @@ class PromptOut(BaseModel):
     scenario_context: Optional[str]
 
 
+class TaskExerciseStateOut(BaseModel):
+    session_id: str
+    current_level: str
+    total_prompts: int
+    completed_prompts: int
+    task_complete: bool
+    current_prompt: Optional[PromptOut]
+
+
+class PatientNotificationOut(BaseModel):
+    id: str
+    notification_type: str
+    message: str
+    is_read: bool
+    created_at: str
+    plan_id: Optional[str] = None
+    assignment_id: Optional[str] = None
+
+
 class TaskAssignmentOut(BaseModel):
     assignment_id: str
     task_id: str

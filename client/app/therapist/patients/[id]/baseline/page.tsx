@@ -68,7 +68,7 @@ export default function TherapistBaselinePage() {
                   <NeoCard key={item.item_id} className="space-y-3">
                     <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                       <div>
-                        <p className="text-xs font-black uppercase tracking-widest text-gray-500">Item {index + 1}</p>
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Item {index + 1}</p>
                         <p className="font-black text-lg">{item.prompt_text ?? "Untitled baseline item"}</p>
                       </div>
                       <span className={`border-4 border-neo-black px-3 py-1 text-sm font-black uppercase ${item.pass_fail ? "bg-neo-primary text-neo-black" : "bg-neo-warning text-neo-black"}`}>
@@ -78,21 +78,51 @@ export default function TherapistBaselinePage() {
 
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                       <div className="border-4 border-neo-black bg-white px-4 py-3">
-                        <p className="text-xs font-black uppercase tracking-widest text-gray-500">Final Score</p>
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Final Score</p>
                         <p className="text-2xl font-black">{item.final_score}</p>
                       </div>
                       <div className="border-4 border-neo-black bg-white px-4 py-3">
-                        <p className="text-xs font-black uppercase tracking-widest text-gray-500">Phoneme Accuracy</p>
-                        <p className="text-2xl font-black">{item.phoneme_accuracy ?? "—"}</p>
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Word Accuracy</p>
+                        <p className="text-2xl font-black">{item.word_accuracy ?? "—"}</p>
                       </div>
                       <div className="border-4 border-neo-black bg-white px-4 py-3">
-                        <p className="text-xs font-black uppercase tracking-widest text-gray-500">Fluency Score</p>
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Phoneme Accuracy</p>
+                        <p className="text-2xl font-black">{item.phoneme_accuracy ?? "—"}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <div className="border-4 border-neo-black bg-white px-4 py-3">
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Fluency Score</p>
                         <p className="text-2xl font-black">{item.fluency_score ?? "—"}</p>
+                      </div>
+                      <div className="border-4 border-neo-black bg-white px-4 py-3">
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Speech Rate (WPM)</p>
+                        <p className="text-2xl font-black">{item.speech_rate_wpm ?? "—"}</p>
+                      </div>
+                      <div className="border-4 border-neo-black bg-white px-4 py-3">
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Speech Rate Score</p>
+                        <p className="text-2xl font-black">{item.speech_rate_score ?? "—"}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <div className="border-4 border-neo-black bg-white px-4 py-3">
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Confidence</p>
+                        <p className="text-2xl font-black">{item.confidence_score ?? "—"}</p>
+                      </div>
+                      <div className="border-4 border-neo-black bg-white px-4 py-3">
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Engagement</p>
+                        <p className="text-2xl font-black">{item.engagement_score ?? "—"}</p>
+                      </div>
+                      <div className="border-4 border-neo-black bg-white px-4 py-3">
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Emotion</p>
+                        <p className="text-2xl font-black capitalize">{item.dominant_emotion ?? "—"}</p>
                       </div>
                     </div>
 
                     <div className="border-4 border-neo-black bg-neo-secondary/40 px-4 py-3">
-                      <p className="text-xs font-black uppercase tracking-widest text-gray-500">Transcript</p>
+                      <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Transcript</p>
                       <p className="font-medium">{item.transcript ?? "Transcript not available for this completed baseline result."}</p>
                     </div>
                   </NeoCard>

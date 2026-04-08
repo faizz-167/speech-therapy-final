@@ -343,6 +343,44 @@ def _create_review_notification(cur, therapist_id: str, patient_id: str, attempt
     )
 
 
+def _mark_prompt_terminal(
+    cur,
+    session_id: str,
+    prompt_id: str,
+    pass_fail: str,
+    attempt_number: int,
+) -> None:
+    if pass_fail != "pass" and attempt_number < 3:
+        return
+
+    cur.execute(
+        "SELECT session_notes FROM session WHERE session_id = %s",
+        (session_id,),
+    )
+    row = cur.fetchone()
+    session_notes = {}
+    if row and row[0]:
+        try:
+            session_notes = json.loads(row[0])
+        except (TypeError, ValueError):
+            session_notes = {}
+
+    completed_prompt_ids = list(session_notes.get("completed_prompt_ids") or [])
+    passed_prompt_ids = list(session_notes.get("passed_prompt_ids") or [])
+
+    if prompt_id not in completed_prompt_ids:
+        completed_prompt_ids.append(prompt_id)
+    if pass_fail == "pass" and prompt_id not in passed_prompt_ids:
+        passed_prompt_ids.append(prompt_id)
+
+    session_notes["completed_prompt_ids"] = completed_prompt_ids
+    session_notes["passed_prompt_ids"] = passed_prompt_ids
+    cur.execute(
+        "UPDATE session SET session_notes = %s WHERE session_id = %s",
+        (json.dumps(session_notes), session_id),
+    )
+
+
 @celery_app.task(name="app.tasks.analysis.analyze_attempt", bind=True, max_retries=2)
 def analyze_attempt(self, attempt_id):
     conn = None
@@ -493,13 +531,14 @@ def analyze_attempt(self, attempt_id):
         if _is_no_speech(transcript, duration, avg_confidence):
             conn = _get_conn()
             cur = conn.cursor()
+            adaptive_decision = "drop" if attempt_number >= 3 else "stay"
             _exec_insert_score_detail(
                 cur,
                 (
                     str(uuid.uuid4()), attempt_id, 0.0, 0.0, 0.0,
                     0.0, 0.0, 0, 0.0, 0.0,
                     0.0, 0.0, 0.0, 0.0, "neutral", 0.0,
-                    0.0, 0.0, 0.0, "drop", "fail",
+                    0.0, 0.0, 0.0, adaptive_decision, "fail",
                     "No speech detected", "needs_improvement", True, True, transcript, duration,
                     "{}",
                 ),
@@ -511,8 +550,9 @@ def analyze_attempt(self, attempt_id):
             )
             _upsert_patient_task_progress(
                 cur, str(patient_id), task_id,
-                level_id, "drop", 0.0, "fail",
+                level_id, adaptive_decision, 0.0, "fail",
             )
+            _mark_prompt_terminal(cur, str(session_id), prompt_id, "fail", attempt_number)
             _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
             if assigned_therapist_id:
                 _create_review_notification(cur, assigned_therapist_id, str(patient_id), str(attempt_id))
@@ -524,7 +564,7 @@ def analyze_attempt(self, attempt_id):
                     attempt_id, attempt_number, transcript,
                     0.0, 0.0, 0.0, 0, 0.0, 0.0,
                     0.0, 0.0, 0.0,
-                    0.0, "fail", "drop", "needs_improvement", "neutral",
+                    0.0, "fail", adaptive_decision, "needs_improvement", "neutral",
                     True, "No speech detected",
                 )),
             )
@@ -571,6 +611,9 @@ def analyze_attempt(self, attempt_id):
             if scores["final_score"] < prompt_advance_threshold:
                 scores = {**scores, "adaptive_decision": "stay", "pass_fail": "pass", "performance_level": "satisfactory"}
 
+        if scores["pass_fail"] == "fail" and attempt_number < 3:
+            scores = {**scores, "adaptive_decision": "stay"}
+
         behavioral_score = _as_float(scores["behavioral_score"])
         speech_score = _as_float(scores["speech_score"])
         final_score = _as_float(scores["final_score"])
@@ -609,6 +652,7 @@ def analyze_attempt(self, attempt_id):
             cur, str(patient_id), task_id,
             level_id, adaptive_decision, final_score, pass_fail,
         )
+        _mark_prompt_terminal(cur, str(session_id), prompt_id, pass_fail, attempt_number)
         _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
         if review_recommended and assigned_therapist_id:
             _create_review_notification(cur, assigned_therapist_id, str(patient_id), str(attempt_id))

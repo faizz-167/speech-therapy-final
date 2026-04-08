@@ -8,7 +8,7 @@ from app.database import get_db
 from app.auth import require_therapist
 from app.models.users import Therapist, Patient, PatientStatus
 from app.models.content import Defect
-from app.models.operations import TherapistNotification
+from app.models.operations import PatientNotification, TherapistNotification
 from app.models.baseline import PatientBaselineResult
 from app.models.plan import TherapyPlan
 from app.schemas.therapist import (
@@ -197,6 +197,11 @@ async def approve_patient(
     patient.pre_assigned_defect_ids = {"defect_ids": body.defect_ids}
     patient.primary_diagnosis = body.primary_diagnosis
     patient.clinical_notes = body.clinical_notes
+    db.add(PatientNotification(
+        patient_id=patient.patient_id,
+        type="therapist_approved",
+        message="Your therapist approved your account. You can begin your baseline assessment.",
+    ))
     await db.commit()
     return {"message": "Patient approved"}
 

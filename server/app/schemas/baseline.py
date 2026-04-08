@@ -53,8 +53,14 @@ class BaselineItemDetailOut(BaseModel):
     item_id: str
     prompt_text: Optional[str]
     transcript: Optional[str]
+    word_accuracy: Optional[float] = None
     phoneme_accuracy: Optional[float]
     fluency_score: Optional[float]
+    speech_rate_wpm: Optional[float] = None
+    speech_rate_score: Optional[float] = None
+    confidence_score: Optional[float] = None
+    engagement_score: Optional[float] = None
+    dominant_emotion: Optional[str] = None
     final_score: float
     pass_fail: bool
     created_at: str

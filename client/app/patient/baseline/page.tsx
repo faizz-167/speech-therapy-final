@@ -11,8 +11,10 @@ import {
   BaselineItem,
   BaselineAssessment,
   AttemptResult,
+  AttemptScore,
   BaselineResult,
 } from "@/types";
+import { ScoreDisplay } from "@/components/patient/ScoreDisplay";
 
 type Phase =
   | "loading"
@@ -81,6 +83,30 @@ function buildItemList(assessments: BaselineAssessment[]): ItemWithContext[] {
     }
   }
   return result;
+}
+
+function toBaselineAttemptScore(attemptResult: AttemptResult): AttemptScore {
+  return {
+    attempt_number: null,
+    word_accuracy: attemptResult.word_accuracy,
+    phoneme_accuracy: attemptResult.phoneme_accuracy,
+    fluency_score: attemptResult.fluency_score,
+    speech_rate_wpm: attemptResult.speech_rate_wpm,
+    speech_rate_score: attemptResult.speech_rate_score,
+    behavioral_score: null,
+    emotion_score: null,
+    dominant_emotion: attemptResult.dominant_emotion,
+    engagement_score: attemptResult.engagement_score,
+    speech_score: null,
+    confidence_score: attemptResult.confidence_score,
+    final_score: attemptResult.computed_score,
+    pass_fail: attemptResult.pass_fail,
+    adaptive_decision: null,
+    asr_transcript: attemptResult.asr_transcript,
+    performance_level: null,
+    review_recommended: false,
+    fail_reason: null,
+  };
 }
 
 export default function BaselinePage() {
@@ -260,7 +286,7 @@ export default function BaselinePage() {
             Resume Baseline
           </div>
           <h2 className="text-3xl font-black uppercase tracking-tighter">Continue where you left off?</h2>
-          <p className="font-medium text-gray-700">
+          <p className="font-medium text-neo-black/80">
             Your previous baseline session is still in progress. You can resume from item {resumeDraft.itemIndex + 1} of {allItems.length}, or start over.
           </p>
           <div className="flex flex-col gap-3 sm:flex-row">
@@ -297,15 +323,15 @@ export default function BaselinePage() {
           <h2 className="text-4xl font-black uppercase tracking-tighter">Baseline Done!</h2>
           <div className="border-4 border-neo-black divide-y-4 divide-neo-black">
             <div className="flex justify-between items-center px-4 py-3">
-              <span className="font-black uppercase text-sm text-gray-500">Assessment</span>
+              <span className="font-black uppercase text-sm text-neo-black/70">Assessment</span>
               <span className="font-black">{baselineName}</span>
             </div>
             <div className="flex justify-between items-center px-4 py-3">
-              <span className="font-black uppercase text-sm text-gray-500">Items Completed</span>
+              <span className="font-black uppercase text-sm text-neo-black/70">Items Completed</span>
               <span className="font-black">{itemCount}</span>
             </div>
             <div className="flex justify-between items-center px-4 py-3">
-              <span className="font-black uppercase text-sm text-gray-500">Raw Score</span>
+              <span className="font-black uppercase text-sm text-neo-black/70">Raw Score</span>
               <span className="font-black text-2xl">{displayScore}</span>
             </div>
             {displayLevel && (
@@ -337,7 +363,7 @@ export default function BaselinePage() {
         </div>
         {/* Overall progress */}
         <div className="flex items-center justify-between border-4 border-neo-black px-4 py-2 bg-white shadow-neo-sm">
-          <span className="font-black uppercase text-xs tracking-widest text-gray-500">Overall Progress</span>
+          <span className="font-black uppercase text-xs tracking-widest text-neo-black/70">Overall Progress</span>
           <span className="font-black text-lg">
             Item {itemIndex + 1} of {allItems.length}
           </span>
@@ -354,11 +380,11 @@ export default function BaselinePage() {
       {/* Section header shown on first item of each section */}
       {isNewSection && currentItem && (
         <div className="border-l-8 border-neo-black pl-4">
-          <p className="text-xs font-black uppercase tracking-widest text-gray-500">
+          <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">
             Section {currentItem.globalSectionIndex + 1} of {currentItem.totalSections}
           </p>
           <h2 className="text-2xl font-black uppercase tracking-tight">{currentItem.sectionName}</h2>
-          <p className="text-sm font-medium text-gray-600">
+          <p className="text-sm font-medium text-neo-black/70">
             {currentItem.sectionItemCount} item{currentItem.sectionItemCount !== 1 ? "s" : ""}
           </p>
         </div>
@@ -366,7 +392,7 @@ export default function BaselinePage() {
 
       {/* Section progress */}
       {currentItem && (
-        <div className="text-xs font-black uppercase tracking-widest text-gray-500">
+        <div className="text-xs font-black uppercase tracking-widest text-neo-black/70">
           Section {currentItem.globalSectionIndex + 1} — {currentItem.sectionName} &mdash;{" "}
           item {currentItem.sectionItemIndex + 1}/{currentItem.sectionItemCount}
         </div>
@@ -376,7 +402,7 @@ export default function BaselinePage() {
         <NeoCard className="p-6 space-y-4">
           <h3 className="text-xl font-black uppercase">{currentItem.task_name ?? "Exercise"}</h3>
           {currentItem.instruction && (
-            <p className="font-bold text-gray-700">{currentItem.instruction}</p>
+            <p className="font-bold text-neo-black/80">{currentItem.instruction}</p>
           )}
           {currentItem.display_content && (
             <div className="border-4 border-neo-black bg-[#FFD93D] p-4 text-xl font-black text-center">
@@ -384,7 +410,7 @@ export default function BaselinePage() {
             </div>
           )}
           {currentItem.expected_output && (
-            <p className="text-sm font-medium text-gray-500 italic">
+            <p className="text-sm font-medium text-neo-black/70 italic">
               Expected: &ldquo;{currentItem.expected_output}&rdquo;
             </p>
           )}
@@ -417,28 +443,7 @@ export default function BaselinePage() {
 
           {phase === "scored" && attemptResult && (
             <div className="space-y-4">
-              <div className={`border-4 border-neo-black p-4 text-center ${
-                attemptResult.result === "scored" ? "bg-neo-secondary" : "bg-neo-accent"
-              }`}>
-                <p className="font-black uppercase text-sm text-gray-600 mb-1">
-                  {attemptResult.result === "scored" ? "Score" : "Try Again"}
-                </p>
-                <p className="text-4xl font-black">
-                  {attemptResult.computed_score != null
-                    ? Math.round(attemptResult.computed_score)
-                    : "—"}
-                </p>
-                {attemptResult.result !== "scored" && (
-                  <p className="text-sm font-medium text-gray-600 mt-2">
-                    Speech clarity needs practice — you&apos;re making progress!
-                  </p>
-                )}
-              </div>
-              {attemptResult.asr_transcript && (
-                <p className="text-sm font-medium text-gray-500 italic text-center">
-                  Heard: &ldquo;{attemptResult.asr_transcript}&rdquo;
-                </p>
-              )}
+              <ScoreDisplay score={toBaselineAttemptScore(attemptResult)} />
               <NeoButton onClick={nextItem} className="w-full">
                 {itemIndex + 1 >= allItems.length ? "Finish Assessment" : "Next Item →"}
               </NeoButton>

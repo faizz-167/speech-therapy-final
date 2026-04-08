@@ -11,6 +11,7 @@ from app.auth import require_therapist
 from app.models.users import Therapist, Patient
 from app.models.plan import TherapyPlan, PlanTaskAssignment, PlanRevisionHistory
 from app.models.content import Task, TaskDefectMapping
+from app.models.operations import PatientNotification
 from app.schemas.plans import (
     GeneratePlanRequest, PlanOut, AssignmentOut, AddTaskRequest,
     UpdateAssignmentRequest, TaskForDefectOut, PlanRevisionEntryOut,
@@ -300,6 +301,12 @@ async def approve_plan(
         note="Plan approved by therapist.",
     )
     db.add(revision)
+    db.add(PatientNotification(
+        patient_id=plan.patient_id,
+        plan_id=plan.plan_id,
+        type="plan_approved",
+        message=f"Your therapist approved the plan '{plan.plan_name}'. Today's tasks are ready.",
+    ))
     await db.commit()
     return {"message": "Plan approved"}
 

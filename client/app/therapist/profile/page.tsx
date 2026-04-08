@@ -32,7 +32,7 @@ export default function ProfilePage() {
       <NeoCard accent="secondary" className="space-y-2">
         <p className="font-black uppercase text-sm">Your Therapist Code</p>
         <p className="text-4xl font-black tracking-widest">{profile.therapist_code}</p>
-        <p className="text-xs font-medium text-gray-600">Share this code with patients when they register</p>
+        <p className="text-xs font-medium text-neo-black/70">Share this code with patients when they register</p>
       </NeoCard>
     </div>
   );

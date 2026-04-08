@@ -1,5 +1,6 @@
 import os
 import uuid
+import json
 import aiofiles
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -20,6 +21,35 @@ from app.config import settings
 router = APIRouter()
 
 
+def _default_session_notes(assignment_id: str | None = None, task_id: str | None = None) -> dict:
+    return {
+        "assignment_id": assignment_id,
+        "task_id": task_id,
+        "completed_prompt_ids": [],
+        "passed_prompt_ids": [],
+        "completed": False,
+        "completion_status": None,
+    }
+
+
+def _parse_session_notes(notes: str | None) -> dict:
+    if not notes:
+        return _default_session_notes()
+    try:
+        parsed = json.loads(notes)
+    except (TypeError, ValueError):
+        return _default_session_notes()
+    if not isinstance(parsed, dict):
+        return _default_session_notes()
+    return {
+        **_default_session_notes(
+            assignment_id=parsed.get("assignment_id"),
+            task_id=parsed.get("task_id"),
+        ),
+        **parsed,
+    }
+
+
 def _parse_browser_datetime(value: str, field_name: str) -> datetime:
     try:
         normalized = value.replace("Z", "+00:00")
@@ -35,6 +65,7 @@ async def start_session(
     db: AsyncSession = Depends(get_db),
 ):
     resolved_plan_id = None
+    assignment: PlanTaskAssignment | None = None
     if body.assignment_id:
         assignment = await db.get(PlanTaskAssignment, body.assignment_id)
         if not assignment:
@@ -45,6 +76,17 @@ async def start_session(
         if plan.status != "approved":
             raise HTTPException(403, "Plan is not approved")
         resolved_plan_id = assignment.plan_id
+        existing_result = await db.execute(
+            select(Session).where(
+                Session.patient_id == patient.patient_id,
+                Session.plan_id == resolved_plan_id,
+                Session.session_type == "therapy",
+            ).order_by(Session.session_date.desc())
+        )
+        for existing_session in existing_result.scalars().all():
+            notes = _parse_session_notes(existing_session.session_notes)
+            if notes.get("assignment_id") == body.assignment_id and not notes.get("completed"):
+                return {"session_id": str(existing_session.session_id)}
     elif body.plan_id:
         plan = await db.get(TherapyPlan, uuid.UUID(body.plan_id))
         if not plan or plan.patient_id != patient.patient_id:
@@ -61,6 +103,12 @@ async def start_session(
         therapist_id=patient.assigned_therapist_id,
         plan_id=resolved_plan_id,
         session_type="therapy",
+        session_notes=json.dumps(
+            _default_session_notes(
+                assignment_id=body.assignment_id,
+                task_id=assignment.task_id if body.assignment_id and assignment else None,
+            )
+        ),
     )
     db.add(session)
     await db.commit()
@@ -103,6 +151,8 @@ async def submit_attempt(
         )
     )
     attempt_number = int(attempt_count_result.scalar() or 0) + 1
+    if attempt_number > 3:
+        raise HTTPException(400, "Maximum attempts reached for this exercise")
 
     ext = os.path.splitext(audio.filename or "audio.webm")[1] or ".webm"
     filename = f"{uuid.uuid4()}{ext}"

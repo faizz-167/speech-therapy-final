@@ -196,7 +196,15 @@ async def poll_baseline_attempt(
         "attempt_id": attempt_id,
         "result": attempt.result,
         "computed_score": float(attempt.computed_score) if attempt.computed_score is not None else None,
+        "word_accuracy": float(attempt.ml_word_accuracy) if attempt.ml_word_accuracy is not None else None,
         "phoneme_accuracy": float(attempt.ml_phoneme_accuracy) if attempt.ml_phoneme_accuracy is not None else None,
+        "fluency_score": float(attempt.ml_fluency_score) if attempt.ml_fluency_score is not None else None,
+        "speech_rate_wpm": float(attempt.ml_speech_rate_wpm) if attempt.ml_speech_rate_wpm is not None else None,
+        "speech_rate_score": float(attempt.ml_speech_rate_score) if attempt.ml_speech_rate_score is not None else None,
+        "confidence_score": float(attempt.ml_confidence) if attempt.ml_confidence is not None else None,
+        "engagement_score": float(attempt.engagement_score) if attempt.engagement_score is not None else None,
+        "dominant_emotion": attempt.dominant_emotion,
+        "pass_fail": "pass" if float(attempt.computed_score or 0) >= 70 else "fail",
         "asr_transcript": attempt.asr_transcript,
     }
 
@@ -260,6 +268,7 @@ async def complete_baseline_session(
         patient_id=patient.patient_id,
         baseline_id=primary_baseline_id,
         therapist_id=patient.assigned_therapist_id,
+        session_id=session.session_id,
         assessed_on=date.today(),
         raw_score=raw_score,
         severity_rating=severity,
@@ -366,13 +375,59 @@ async def therapist_get_baseline_items(
         .order_by(BaselineItem.order_index)
     )
     rows = items_result.all()
+    attempts_by_item: dict[str, BaselineAttempt] = {}
+    if baseline_result.session_id:
+        attempts_result = await db.execute(
+            select(BaselineAttempt).where(
+                BaselineAttempt.session_id == baseline_result.session_id,
+                BaselineAttempt.item_id.in_([item.item_id for _, item in rows]),
+            )
+        )
+        attempts_by_item = {
+            attempt.item_id: attempt
+            for attempt in attempts_result.scalars().all()
+        }
     return [
         BaselineItemDetailOut(
             item_id=item.item_id,
             prompt_text=item.instruction or item.display_content,
-            transcript=None,
-            phoneme_accuracy=None,
-            fluency_score=None,
+            transcript=attempts_by_item.get(item.item_id).asr_transcript if attempts_by_item.get(item.item_id) else None,
+            word_accuracy=(
+                float(attempts_by_item[item.item_id].ml_word_accuracy)
+                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_word_accuracy is not None
+                else None
+            ),
+            phoneme_accuracy=(
+                float(attempts_by_item[item.item_id].ml_phoneme_accuracy)
+                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_phoneme_accuracy is not None
+                else None
+            ),
+            fluency_score=(
+                float(attempts_by_item[item.item_id].ml_fluency_score)
+                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_fluency_score is not None
+                else None
+            ),
+            speech_rate_wpm=(
+                float(attempts_by_item[item.item_id].ml_speech_rate_wpm)
+                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_speech_rate_wpm is not None
+                else None
+            ),
+            speech_rate_score=(
+                float(attempts_by_item[item.item_id].ml_speech_rate_score)
+                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_speech_rate_score is not None
+                else None
+            ),
+            confidence_score=(
+                float(attempts_by_item[item.item_id].ml_confidence)
+                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_confidence is not None
+                else None
+            ),
+            engagement_score=(
+                float(attempts_by_item[item.item_id].engagement_score)
+                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].engagement_score is not None
+                else None
+            ),
+            dominant_emotion=attempts_by_item.get(item.item_id).dominant_emotion if attempts_by_item.get(item.item_id) else None,
             final_score=float(item_result.score_given) if item_result.score_given is not None else 0.0,
             pass_fail=(float(item_result.score_given) >= 70) if item_result.score_given is not None else False,
             created_at=baseline_result.assessed_on.isoformat(),

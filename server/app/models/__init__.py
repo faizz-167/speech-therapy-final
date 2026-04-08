@@ -13,4 +13,4 @@ from app.models.scoring import (
     Session, SessionPromptAttempt, AttemptScoreDetail,
     PatientTaskProgress, SessionEmotionSummary,
 )
-from app.models.operations import AudioFile, TherapistNotification
+from app.models.operations import AudioFile, TherapistNotification, PatientNotification

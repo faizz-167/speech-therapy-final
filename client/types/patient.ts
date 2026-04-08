@@ -42,3 +42,13 @@ export interface HomeData {
 }
 
 export type HomeSummary = Pick<HomeData, "has_approved_plan" | "plan_name" | "plan_start_date" | "plan_end_date">;
+
+export interface PatientNotification {
+  id: string;
+  notification_type: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+  plan_id: string | null;
+  assignment_id: string | null;
+}

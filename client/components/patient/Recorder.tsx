@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { NeoButton } from "@/components/ui/NeoButton";
 import type { RecordingMeta } from "@/types";
 
@@ -17,10 +17,21 @@ export function Recorder({ onRecordingComplete, disabled }: RecorderProps) {
   const micActivatedAtRef = useRef<string | null>(null);
   const speechStartAtRef = useRef<string | null>(null);
   const blobRef = useRef<Blob | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
   const metaRef = useRef<RecordingMeta | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      stopLevelTracking();
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+    };
+  }, []);
 
   function stopLevelTracking() {
     if (animationFrameRef.current !== null) {
@@ -59,6 +70,10 @@ export function Recorder({ onRecordingComplete, disabled }: RecorderProps) {
       const blob = new Blob(chunksRef.current, { type: "audio/webm" });
       stopLevelTracking();
       blobRef.current = blob;
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+      }
+      previewUrlRef.current = URL.createObjectURL(blob);
       metaRef.current = {
         micActivatedAt: micActivatedAtRef.current ?? activatedAt,
         speechStartAt: speechStartAtRef.current,
@@ -103,6 +118,10 @@ export function Recorder({ onRecordingComplete, disabled }: RecorderProps) {
   }
 
   function handleReRecord() {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
     blobRef.current = null;
     metaRef.current = null;
     setCaptured(false);
@@ -116,7 +135,7 @@ export function Recorder({ onRecordingComplete, disabled }: RecorderProps) {
 
   if (disabled) {
     return (
-      <div className="border-4 border-black bg-gray-100 p-4 text-center font-bold text-gray-500">
+      <div className="border-4 border-black bg-neo-muted/20 p-4 text-center font-bold text-neo-black/70">
         Listen to the instruction first...
       </div>
     );
@@ -126,6 +145,11 @@ export function Recorder({ onRecordingComplete, disabled }: RecorderProps) {
     return (
       <div className="border-4 border-black p-4 space-y-3 text-center">
         <p className="text-sm font-bold text-green-700">Recording ready ✓</p>
+        {previewUrlRef.current ? (
+          <audio controls className="w-full" src={previewUrlRef.current}>
+            Your browser does not support audio playback.
+          </audio>
+        ) : null}
         <div className="flex gap-3">
           <NeoButton variant="ghost" onClick={handleReRecord} className="flex-1">
             Re-record

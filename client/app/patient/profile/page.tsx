@@ -44,28 +44,28 @@ export default function PatientProfilePage() {
 
       {/* Details List */}
       <div className="bg-white border-4 border-neo-black shadow-neo-sm">
-        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-gray-50">
-          <span className="font-black uppercase text-gray-500 tracking-wider">Date of Birth</span>
+        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-neo-bg">
+          <span className="font-black uppercase text-neo-black/70 tracking-wider">Date of Birth</span>
           <span className="font-black text-lg">{profile.date_of_birth}</span>
         </div>
-        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-gray-50">
-          <span className="font-black uppercase text-gray-500 tracking-wider">Gender</span>
+        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-neo-bg">
+          <span className="font-black uppercase text-neo-black/70 tracking-wider">Gender</span>
           <span className="font-black text-lg lowercase">{profile.gender ?? "—"}</span>
         </div>
-        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-gray-50">
-          <span className="font-black uppercase text-gray-500 tracking-wider">Status</span>
+        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-neo-bg">
+          <span className="font-black uppercase text-neo-black/70 tracking-wider">Status</span>
           <span className="font-black text-lg uppercase">{profile.status}</span>
         </div>
-        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-gray-50">
-          <span className="font-black uppercase text-gray-500 tracking-wider">Therapist</span>
+        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-neo-bg">
+          <span className="font-black uppercase text-neo-black/70 tracking-wider">Therapist</span>
           <span className="font-black text-lg">{profile.therapist_name ?? "—"}</span>
         </div>
-        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-gray-50">
-          <span className="font-black uppercase text-gray-500 tracking-wider">Diagnosis</span>
+        <div className="flex justify-between items-center px-4 py-4 border-b-4 border-neo-black hover:bg-neo-bg">
+          <span className="font-black uppercase text-neo-black/70 tracking-wider">Diagnosis</span>
           <span className="font-black text-lg">{profile.primary_diagnosis ?? "—"}</span>
         </div>
-        <div className="flex justify-between items-center px-4 py-4 hover:bg-gray-50">
-          <span className="font-black uppercase text-gray-500 tracking-wider">Member Since</span>
+        <div className="flex justify-between items-center px-4 py-4 hover:bg-neo-bg">
+          <span className="font-black uppercase text-neo-black/70 tracking-wider">Member Since</span>
           <span className="font-black text-lg">
             {profile.member_since ? new Date(profile.member_since).toLocaleDateString() : "—"}
           </span>

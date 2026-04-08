@@ -69,7 +69,7 @@ export default function TherapistPatientProgressPage() {
           <div className="text-3xl">😶</div>
           <div>
             <p className="font-black uppercase text-sm">Emotion &amp; Engagement</p>
-            <p className="text-xs font-medium text-gray-600">
+            <p className="text-xs font-medium text-neo-black/70">
               Dominant emotion: <span className="font-black uppercase">{data.dominant_emotion}</span>
             </p>
           </div>
@@ -95,7 +95,7 @@ export default function TherapistPatientProgressPage() {
         <h2 className="font-black uppercase">Task Breakdown</h2>
         {data.task_metrics.map((t) => {
           const levelKey = (t.current_level ?? "").toLowerCase();
-          const levelClass = levelColors[levelKey] ?? "bg-gray-100 border-gray-400 text-gray-700";
+          const levelClass = levelColors[levelKey] ?? "bg-neo-muted/20 border-gray-400 text-neo-black/80";
           const trend = t.last_attempt_result === "pass" ? "↑" : t.last_attempt_result === "fail" ? "↓" : null;
           const trendColor = t.last_attempt_result === "pass" ? "text-green-700" : "text-red-600";
           return (
@@ -106,7 +106,7 @@ export default function TherapistPatientProgressPage() {
                   {trend && <span className={`font-black text-lg ${trendColor}`}>{trend}</span>}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-xs font-medium text-gray-500">{t.total_attempts} attempts</p>
+                  <p className="text-xs font-medium text-neo-black/70">{t.total_attempts} attempts</p>
                   {t.current_level && (
                     <span className={`border-2 px-2 py-0.5 text-xs font-black uppercase ${levelClass}`}>
                       {t.current_level}

@@ -35,6 +35,26 @@ app.include_router(progress.router, prefix="", tags=["progress"])
 async def ensure_schema_tables() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.exec_driver_sql(
+            "ALTER TABLE IF EXISTS baseline_attempt "
+            "ADD COLUMN IF NOT EXISTS ml_speech_rate_score NUMERIC"
+        )
+        await conn.exec_driver_sql(
+            "ALTER TABLE IF EXISTS baseline_attempt "
+            "ADD COLUMN IF NOT EXISTS dominant_emotion VARCHAR"
+        )
+        await conn.exec_driver_sql(
+            "ALTER TABLE IF EXISTS baseline_attempt "
+            "ADD COLUMN IF NOT EXISTS emotion_score NUMERIC"
+        )
+        await conn.exec_driver_sql(
+            "ALTER TABLE IF EXISTS baseline_attempt "
+            "ADD COLUMN IF NOT EXISTS engagement_score NUMERIC"
+        )
+        await conn.exec_driver_sql(
+            "ALTER TABLE IF EXISTS patient_baseline_result "
+            "ADD COLUMN IF NOT EXISTS session_id UUID"
+        )
 
 @app.get("/health")
 async def health():

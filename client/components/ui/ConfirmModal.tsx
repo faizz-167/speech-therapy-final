@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { NeoButton } from "@/components/ui/NeoButton";
 
 interface ConfirmModalProps {
   open: boolean;
@@ -35,22 +36,20 @@ export function ConfirmModal({
         <h2 className="text-2xl font-black uppercase">{title}</h2>
         <p className="font-medium">{message}</p>
         <div className="flex gap-3">
-          <button
+          <NeoButton
             onClick={onCancel}
-            className="flex-1 border-4 border-neo-black px-4 py-2 font-black uppercase hover:bg-neo-muted transition-colors"
+            variant="ghost"
+            className="flex-1"
           >
             {cancelLabel}
-          </button>
-          <button
+          </NeoButton>
+          <NeoButton
             onClick={onConfirm}
-            className={`flex-1 border-4 border-neo-black px-4 py-2 font-black uppercase transition-colors ${
-              dangerous
-                ? "bg-neo-accent hover:bg-yellow-400"
-                : "bg-neo-black text-white hover:bg-gray-800"
-            }`}
+            variant={dangerous ? "primary" : "secondary"}
+            className={`flex-1 ${dangerous ? "bg-neo-accent" : "bg-neo-black text-white hover:bg-white hover:text-neo-black"}`}
           >
             {confirmLabel}
-          </button>
+          </NeoButton>
         </div>
       </div>
     </div>

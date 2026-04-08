@@ -8,6 +8,15 @@ export interface Prompt {
   scenario_context: string | null;
 }
 
+export interface TaskExerciseState {
+  session_id: string;
+  current_level: string;
+  total_prompts: number;
+  completed_prompts: number;
+  task_complete: boolean;
+  current_prompt: Prompt | null;
+}
+
 export interface AttemptScore {
   attempt_number: number | null;
   word_accuracy: number | null;

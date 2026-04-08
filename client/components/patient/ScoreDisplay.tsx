@@ -7,7 +7,7 @@ export function ScoreDisplay({ score }: { score: AttemptScore }) {
     <div className="space-y-4 animate-pop-in">
       <NeoCard accent={isPassed ? "secondary" : "accent"} className="text-center space-y-2">
         {score.attempt_number ? (
-          <div className="text-xs font-black uppercase text-gray-600">Attempt {score.attempt_number}</div>
+          <div className="text-xs font-black uppercase text-neo-black/70">Attempt {score.attempt_number}</div>
         ) : null}
         <div className="text-5xl font-black">
           {score.final_score?.toFixed(1)}
@@ -41,7 +41,7 @@ export function ScoreDisplay({ score }: { score: AttemptScore }) {
           ] as [string, number | string | undefined][]
         ).map(([label, value]) => (
           <div key={label}>
-            <p className="font-black uppercase text-xs text-gray-500">{label}</p>
+            <p className="font-black uppercase text-xs text-neo-black/70">{label}</p>
             <p className="font-bold">
               {typeof value === "number"
                 ? label === "Speech Rate (WPM)"
