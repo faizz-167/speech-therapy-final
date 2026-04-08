@@ -41,3 +41,14 @@ export interface BaselineResult {
   level: string;
   assessed_on: string;
 }
+
+export interface BaselineItemDetail {
+  item_id: string;
+  prompt_text: string | null;
+  transcript: string | null;
+  phoneme_accuracy: number | null;
+  fluency_score: number | null;
+  final_score: number;
+  pass_fail: boolean;
+  created_at: string;
+}

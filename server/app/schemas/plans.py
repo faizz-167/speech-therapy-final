@@ -43,3 +43,11 @@ class TaskForDefectOut(BaseModel):
     name: str
     task_mode: str
     type: str
+
+
+class PlanRevisionEntryOut(BaseModel):
+    id: str
+    action: str
+    actor_role: str
+    change_summary: Optional[str]
+    created_at: str

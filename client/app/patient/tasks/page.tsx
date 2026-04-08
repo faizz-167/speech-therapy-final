@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Assignment, HomeSummary } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
@@ -10,27 +10,22 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import Link from "next/link";
 
 export default function TasksPage() {
-  const [tasks, setTasks] = useState<Assignment[]>([]);
-  const [homeSummary, setHomeSummary] = useState<HomeSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const results = useQueries({
+    queries: [
+      { queryKey: ["patient", "tasks"], queryFn: () => api.get<Assignment[]>("/patient/tasks") },
+      { queryKey: ["patient", "home"], queryFn: () => api.get<HomeSummary>("/patient/home").catch(() => null) },
+    ],
+  });
 
-  useEffect(() => {
-    Promise.all([
-      api.get<Assignment[]>("/patient/tasks"),
-      api.get<HomeSummary>("/patient/home").catch(() => null),
-    ])
-      .then(([taskList, summary]) => {
-        setTasks(taskList);
-        setHomeSummary(summary);
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+  const [tasksQ, homeQ] = results;
+  const isLoading = results.some((r) => r.isLoading);
+  const error = tasksQ.error;
 
-  if (loading) return <LoadingState label="Loading your tasks..." />;
-  if (error) return <ErrorState message={error} />;
+  if (isLoading) return <LoadingState label="Loading your tasks..." />;
+  if (error) return <ErrorState message={error instanceof Error ? error.message : "Failed to load"} />;
 
+  const tasks = tasksQ.data ?? [];
+  const homeSummary = homeQ.data ?? null;
   const allCompleted = tasks.length > 0 && tasks.every((t) => t.status === "completed");
 
   const day = new Date().toLocaleDateString("en-US", {

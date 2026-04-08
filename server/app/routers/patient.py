@@ -5,17 +5,17 @@ from typing import Annotated
 from datetime import date
 from app.database import get_db
 from app.auth import require_patient
-from app.models.users import Patient
+from app.models.users import Patient, Therapist
 from app.models.content import Task, TaskLevel, Prompt, Defect
 from app.models.plan import TherapyPlan, PlanTaskAssignment
 from app.models.baseline import PatientBaselineResult
 from app.models.scoring import PatientTaskProgress
-from app.schemas.patient import TaskAssignmentOut, PromptOut
+from app.schemas.patient import TaskAssignmentOut, PromptOut, PatientProfileOut
 
 router = APIRouter()
 
 
-@router.get("/profile")
+@router.get("/profile", response_model=PatientProfileOut)
 async def get_profile(
     patient: Annotated[Patient, Depends(require_patient)],
     db: AsyncSession = Depends(get_db),
@@ -31,6 +31,13 @@ async def get_profile(
                 {"defect_id": d.defect_id, "name": d.name, "category": d.category}
                 for d in defect_result.scalars().all()
             ]
+
+    therapist_name = None
+    if patient.assigned_therapist_id:
+        therapist = await db.get(Therapist, patient.assigned_therapist_id)
+        if therapist:
+            therapist_name = therapist.full_name
+
     return {
         "patient_id": str(patient.patient_id),
         "full_name": patient.full_name,
@@ -39,7 +46,11 @@ async def get_profile(
         "gender": patient.gender,
         "status": patient.status.value,
         "current_streak": patient.current_streak,
+        "best_streak": patient.longest_streak,
         "assigned_defects": assigned_defects,
+        "therapist_name": therapist_name,
+        "primary_diagnosis": patient.primary_diagnosis,
+        "member_since": patient.created_at.isoformat() if patient.created_at else None,
     }
 
 

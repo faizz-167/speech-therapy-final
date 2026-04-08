@@ -2,6 +2,27 @@ from pydantic import BaseModel
 from typing import Optional
 
 
+class AssignedDefectOut(BaseModel):
+    defect_id: str
+    name: str
+    category: str
+
+
+class PatientProfileOut(BaseModel):
+    patient_id: str
+    full_name: str
+    email: str
+    date_of_birth: str
+    gender: Optional[str]
+    status: str
+    current_streak: int
+    best_streak: int
+    assigned_defects: list[AssignedDefectOut]
+    therapist_name: Optional[str]
+    primary_diagnosis: Optional[str]
+    member_since: Optional[str]
+
+
 class PromptOut(BaseModel):
     prompt_id: str
     prompt_type: str

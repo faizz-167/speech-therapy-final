@@ -9,6 +9,16 @@ class DefectItem(BaseModel):
     category: str
 
 
+class NotificationOut(BaseModel):
+    id: str
+    notification_type: str
+    message: str
+    is_read: bool
+    created_at: str
+    patient_id: Optional[str]
+    attempt_id: Optional[str]
+
+
 class PatientListItem(BaseModel):
     patient_id: str
     full_name: str
@@ -58,6 +68,10 @@ class DashboardResponse(BaseModel):
     total_patients: int
     approved_patients: int
     pending_patients: int
+    patients_without_baseline: int = 0
+    patients_without_approved_plan: int = 0
+    plans_pending_approval: int = 0
+    unread_notification_count: int = 0
 
 
 class TherapistProfileResponse(BaseModel):

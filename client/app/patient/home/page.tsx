@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
@@ -7,13 +7,6 @@ import { LoadingState } from "@/components/ui/LoadingState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import Link from "next/link";
 import { Assignment, BaselineResult, HomeData, PatientProfile } from "@/types";
-
-type HomeBundle = {
-  home: HomeData;
-  profile: PatientProfile | null;
-  tasks: Assignment[];
-  baseline: BaselineResult | null;
-};
 
 function formatPlanDate(value: string | null): string {
   if (!value) return "—";
@@ -24,24 +17,28 @@ function formatPlanDate(value: string | null): string {
 }
 
 export default function PatientHomePage() {
-  const [bundle, setBundle] = useState<HomeBundle | null>(null);
-  const [error, setError] = useState("");
+  const results = useQueries({
+    queries: [
+      { queryKey: ["patient", "home"], queryFn: () => api.get<HomeData>("/patient/home") },
+      { queryKey: ["patient", "profile"], queryFn: () => api.get<PatientProfile>("/patient/profile").catch(() => null) },
+      { queryKey: ["patient", "tasks"], queryFn: () => api.get<Assignment[]>("/patient/tasks").catch(() => [] as Assignment[]) },
+      { queryKey: ["patient", "baseline-result"], queryFn: () => api.get<BaselineResult | null>("/baseline/result").catch(() => null) },
+    ],
+  });
 
-  useEffect(() => {
-    Promise.all([
-      api.get<HomeData>("/patient/home"),
-      api.get<PatientProfile>("/patient/profile").catch(() => null),
-      api.get<Assignment[]>("/patient/tasks").catch(() => []),
-      api.get<BaselineResult | null>("/baseline/result").catch(() => null),
-    ])
-      .then(([home, profile, tasks, baseline]) => setBundle({ home, profile, tasks, baseline }))
-      .catch((err: Error) => setError(err.message));
-  }, []);
+  const [homeQ, profileQ, tasksQ, baselineQ] = results;
+  const isLoading = results.some((r) => r.isLoading);
+  const mainError = homeQ.error;
 
-  if (error) return <ErrorState message={error} />;
-  if (!bundle) return <LoadingState label="Loading your home screen..." />;
+  if (isLoading) return <LoadingState label="Loading your home screen..." />;
+  if (mainError) return <ErrorState message={mainError instanceof Error ? mainError.message : "Failed to load"} />;
+  if (!homeQ.data) return <LoadingState label="Loading your home screen..." />;
 
-  const { home: data, profile, tasks, baseline } = bundle;
+  const data = homeQ.data;
+  const profile = profileQ.data ?? null;
+  const tasks = tasksQ.data ?? [];
+  const baseline = baselineQ.data ?? null;
+
   const allTasksDone =
     data.has_approved_plan &&
     tasks.length > 0 &&

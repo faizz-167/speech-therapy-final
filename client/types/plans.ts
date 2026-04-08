@@ -18,3 +18,11 @@ export interface Plan {
   goals: string | null;
   assignments: Assignment[];
 }
+
+export interface PlanRevisionEntry {
+  id: string;
+  action: string;
+  actor_role: string;
+  change_summary: string | null;
+  created_at: string;
+}

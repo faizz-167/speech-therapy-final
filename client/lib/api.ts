@@ -94,5 +94,5 @@ export const api = {
   delete: <T>(path: string, options?: RequestInit & { timeout?: number; handleAuthFailure?: boolean }) =>
     request<T>(path, { ...options, method: "DELETE" }),
   upload: <T>(path: string, form: FormData, options?: RequestInit & { timeout?: number; handleAuthFailure?: boolean }) =>
-    request<T>(path, { ...options, method: "POST", body: form, timeout: 60000 }),
+    request<T>(path, { ...options, method: "POST", body: form }),
 };

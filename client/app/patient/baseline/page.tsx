@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { LoadingState } from "@/components/ui/LoadingState";
@@ -177,18 +178,24 @@ export default function BaselinePage() {
 
       const { attempt_id } = await api.upload<{ attempt_id: string }>(
         `/baseline/${sessionId}/attempt`,
-        form
+        form,
+        { timeout: 30_000 }
       );
       setPhase("polling");
       await pollResult(attempt_id);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+      const msg = e instanceof Error && e.name === "AbortError"
+        ? "Upload timed out. Please check your connection and try again."
+        : (e instanceof Error ? e.message : "Upload failed");
+      toast.error(msg);
+      setError(msg);
       setPhase("error");
     }
   };
 
   const pollResult = async (attemptId: string) => {
-    for (let i = 0; i < 30; i++) {
+    // 45 × 2s = 90s timeout
+    for (let i = 0; i < 45; i++) {
       await new Promise((r) => setTimeout(r, 2000));
       try {
         const res = await api.get<AttemptResult>(`/baseline/attempt/${attemptId}`);
@@ -201,7 +208,9 @@ export default function BaselinePage() {
         // keep polling
       }
     }
-    setError("Scoring timed out. Please try again.");
+    const msg = "Analysis is taking longer than expected. Your attempt was saved — your therapist will be notified.";
+    toast.info(msg);
+    setError(msg);
     setPhase("error");
   };
 
@@ -411,12 +420,19 @@ export default function BaselinePage() {
               <div className={`border-4 border-neo-black p-4 text-center ${
                 attemptResult.result === "scored" ? "bg-neo-secondary" : "bg-neo-accent"
               }`}>
-                <p className="font-black uppercase text-sm text-gray-600 mb-1">Score</p>
+                <p className="font-black uppercase text-sm text-gray-600 mb-1">
+                  {attemptResult.result === "scored" ? "Score" : "Try Again"}
+                </p>
                 <p className="text-4xl font-black">
                   {attemptResult.computed_score != null
                     ? Math.round(attemptResult.computed_score)
                     : "—"}
                 </p>
+                {attemptResult.result !== "scored" && (
+                  <p className="text-sm font-medium text-gray-600 mt-2">
+                    Speech clarity needs practice — you&apos;re making progress!
+                  </p>
+                )}
               </div>
               {attemptResult.asr_transcript && (
                 <p className="text-sm font-medium text-gray-500 italic text-center">

@@ -13,11 +13,26 @@ from app.models.plan import TherapyPlan, PlanTaskAssignment, PlanRevisionHistory
 from app.models.content import Task, TaskDefectMapping
 from app.schemas.plans import (
     GeneratePlanRequest, PlanOut, AssignmentOut, AddTaskRequest,
-    UpdateAssignmentRequest, TaskForDefectOut,
+    UpdateAssignmentRequest, TaskForDefectOut, PlanRevisionEntryOut,
 )
 from app.services.plan_generator import generate_weekly_plan
 
 router = APIRouter()
+
+
+def _build_revision_summary(entry: PlanRevisionHistory) -> str | None:
+    if entry.note:
+        return entry.note
+    if entry.action == "add_task" and entry.new_value:
+        return f"Added task {entry.new_value.get('task_id')} to day {entry.new_value.get('day_index')}"
+    if entry.action == "reorder" and entry.new_value:
+        return (
+            f"Moved assignment to day {entry.new_value.get('day_index')} "
+            f"with priority {entry.new_value.get('priority_order')}"
+        )
+    if entry.action == "remove_task" and entry.old_value:
+        return f"Removed task {entry.old_value.get('task_id')} from day {entry.old_value.get('day_index')}"
+    return None
 
 
 async def _plan_to_out(plan: TherapyPlan, db: AsyncSession) -> PlanOut:
@@ -287,6 +302,39 @@ async def approve_plan(
     db.add(revision)
     await db.commit()
     return {"message": "Plan approved"}
+
+
+@router.get("/{plan_id}/revision-history", response_model=list[PlanRevisionEntryOut])
+async def get_revision_history(
+    plan_id: str,
+    therapist: Annotated[Therapist, Depends(require_therapist)],
+    db: AsyncSession = Depends(get_db),
+):
+    plan_result = await db.execute(
+        select(TherapyPlan).where(
+            TherapyPlan.plan_id == plan_id,
+            TherapyPlan.therapist_id == therapist.therapist_id,
+        )
+    )
+    plan = plan_result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
+    history_result = await db.execute(
+        select(PlanRevisionHistory)
+        .where(PlanRevisionHistory.plan_id == plan.plan_id)
+        .order_by(PlanRevisionHistory.created_at.asc())
+    )
+    entries = history_result.scalars().all()
+    return [
+        PlanRevisionEntryOut(
+            id=str(e.revision_id),
+            action=e.action,
+            actor_role="therapist",
+            change_summary=_build_revision_summary(e),
+            created_at=e.created_at.isoformat(),
+        )
+        for e in entries
+    ]
 
 
 @router.get("/{plan_id}/tasks-for-defects", response_model=list[TaskForDefectOut])

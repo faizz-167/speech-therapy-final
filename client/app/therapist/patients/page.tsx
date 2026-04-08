@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Patient } from "@/types";
 import { PatientCard } from "@/components/therapist/PatientCard";
@@ -8,24 +8,18 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 
 export default function PatientsPage() {
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { data: patients, error, isLoading } = useQuery<Patient[]>({
+    queryKey: ["therapist", "patients"],
+    queryFn: () => api.get<Patient[]>("/therapist/patients"),
+  });
 
-  useEffect(() => {
-    api.get<Patient[]>("/therapist/patients")
-      .then(setPatients)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <LoadingState label="Loading patients..." />;
-  if (error) return <ErrorState message={error} />;
+  if (isLoading) return <LoadingState label="Loading patients..." />;
+  if (error) return <ErrorState message={error instanceof Error ? error.message : "Failed to load"} />;
 
   return (
     <div className="space-y-6 animate-fade-up">
       <h1 className="text-3xl font-black uppercase">Patients</h1>
-      {patients.length === 0 ? (
+      {!patients || patients.length === 0 ? (
         <EmptyState
           icon="🧑‍⚕️"
           heading="No Patients Yet"

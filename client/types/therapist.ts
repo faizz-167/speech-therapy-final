@@ -27,10 +27,24 @@ export interface TherapistDashboard {
   total_patients: number;
   approved_patients: number;
   pending_patients: number;
+  patients_without_baseline: number;
+  patients_without_approved_plan: number;
+  plans_pending_approval: number;
+  unread_notification_count: number;
 }
 
 export interface ApproveRequest {
   defect_ids: string[];
   primary_diagnosis?: string;
   clinical_notes?: string;
+}
+
+export interface Notification {
+  id: string;
+  notification_type: 'patient_registered' | 'review_flagged' | string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+  patient_id: string | null;
+  attempt_id: string | null;
 }

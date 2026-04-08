@@ -46,3 +46,14 @@ class BaselineResultOut(BaseModel):
     raw_score: int
     level: str
     assessed_on: str
+
+
+class BaselineItemDetailOut(BaseModel):
+    item_id: str
+    prompt_text: Optional[str]
+    transcript: Optional[str]
+    phoneme_accuracy: Optional[float]
+    fluency_score: Optional[float]
+    final_score: float
+    pass_fail: bool
+    created_at: str

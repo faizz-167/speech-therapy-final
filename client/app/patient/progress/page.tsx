@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { LoadingState } from "@/components/ui/LoadingState";
@@ -25,19 +25,14 @@ const LEVEL_COLORS: Record<string, string> = {
 };
 
 export default function ProgressPage() {
-  const [data, setData] = useState<Progress | null>(null);
-  const [error, setError] = useState("");
+  const { data, error, isLoading } = useQuery<Progress>({
+    queryKey: ["patient", "progress"],
+    queryFn: () => api.get<Progress>("/patient/progress"),
+  });
 
-  useEffect(() => {
-    api
-      .get<Progress>("/patient/progress")
-      .then(setData)
-      .catch((e: Error) => setError(e.message));
-  }, []);
-
-  if (error) return <ErrorState message={error} />;
-  if (!data) return <LoadingState label="Loading progress..." />;
-  if (data.total_attempts === 0) {
+  if (isLoading) return <LoadingState label="Loading progress..." />;
+  if (error) return <ErrorState message={error instanceof Error ? error.message : "Failed to load"} />;
+  if (!data || data.total_attempts === 0) {
     return (
       <EmptyState
         icon="📈"

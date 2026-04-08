@@ -19,7 +19,7 @@ from app.models.baseline import (
 )
 from app.schemas.baseline import (
     BaselineAssessmentOut, BaselineSectionOut, BaselineItemOut,
-    BaselineResultOut,
+    BaselineResultOut, BaselineItemDetailOut,
 )
 from app.tasks.baseline_analysis import analyze_baseline_attempt
 
@@ -321,3 +321,46 @@ async def therapist_get_baseline(
         level=br.severity_rating or score_to_level(br.raw_score or 0),
         assessed_on=br.assessed_on,
     )
+
+
+@router.get("/therapist-view/{patient_id}/items", response_model=list[BaselineItemDetailOut])
+async def therapist_get_baseline_items(
+    patient_id: str,
+    therapist: Annotated[Therapist, Depends(require_therapist)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Return item-level data for the patient's latest completed baseline result."""
+    patient = await db.get(Patient, patient_id)
+    if not patient or patient.assigned_therapist_id != therapist.therapist_id:
+        raise HTTPException(404, "Patient not found")
+
+    result_result = await db.execute(
+        select(PatientBaselineResult)
+        .where(PatientBaselineResult.patient_id == patient.patient_id)
+        .order_by(PatientBaselineResult.assessed_on.desc())
+        .limit(1)
+    )
+    baseline_result = result_result.scalar_one_or_none()
+    if not baseline_result:
+        return []
+
+    items_result = await db.execute(
+        select(BaselineItemResult, BaselineItem)
+        .join(BaselineItem, BaselineItemResult.item_id == BaselineItem.item_id)
+        .where(BaselineItemResult.result_id == baseline_result.result_id)
+        .order_by(BaselineItem.order_index)
+    )
+    rows = items_result.all()
+    return [
+        BaselineItemDetailOut(
+            item_id=item.item_id,
+            prompt_text=item.instruction or item.display_content,
+            transcript=None,
+            phoneme_accuracy=None,
+            fluency_score=None,
+            final_score=float(item_result.score_given) if item_result.score_given is not None else 0.0,
+            pass_fail=(float(item_result.score_given) >= 70) if item_result.score_given is not None else False,
+            created_at=baseline_result.assessed_on.isoformat(),
+        )
+        for item_result, item in rows
+    ]

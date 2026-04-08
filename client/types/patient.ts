@@ -23,7 +23,11 @@ export interface PatientProfile {
   gender: string | null;
   status: string;
   current_streak: number;
+  best_streak: number;
   assigned_defects: AssignedDefect[];
+  therapist_name: string | null;
+  primary_diagnosis: string | null;
+  member_since: string | null;
 }
 
 export interface HomeData {

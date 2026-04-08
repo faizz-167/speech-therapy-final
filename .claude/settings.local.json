@@ -16,7 +16,10 @@
       "Bash(npx tsc:*)",
       "Bash(ls:*)",
       "Bash(node:*)",
-      "Bash(git diff:*)"
+      "Bash(git diff:*)",
+      "Bash(npx --prefix \"D:/Developer/zingBizz/zingbrokers/client\" tsc --noEmit)",
+      "Bash(cmd /c \"cd /d D:\\\\Developer\\\\zingBizz\\\\zingbrokers\\\\client && npx tsc --noEmit 2>&1\")",
+      "Bash(powershell:*)"
     ]
   }
 }

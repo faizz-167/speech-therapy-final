@@ -1,10 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Plan, Task, Assignment } from "@/types";
+import { toast } from "@/lib/toast";
+import { Plan, Task, Assignment, PlanRevisionEntry } from "@/types";
 import { KanbanBoard } from "@/components/therapist/KanbanBoard";
 import { NeoButton } from "@/components/ui/NeoButton";
+import { NeoCard } from "@/components/ui/NeoCard";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -12,140 +15,90 @@ import Link from "next/link";
 
 export default function PlanPage() {
   const { id } = useParams<{ id: string }>();
-  const [plan, setPlan] = useState<Plan | null>(null);
-  const [availableTasks, setAvailableTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const qc = useQueryClient();
+  const [showHistory, setShowHistory] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [approving, setApproving] = useState(false);
-  const [mutationState, setMutationState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
 
-  async function loadPlan() {
-    try {
-      const p = await api.get<Plan | null>(`/plans/patient/${id}/current`);
-      setPlan(p);
-      if (p) {
-        const tasks = await api.get<Task[]>(
-          `/plans/${p.plan_id}/tasks-for-defects`
-        );
-        setAvailableTasks(tasks);
-      }
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load plan");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { data: plan, error, isLoading, refetch: refetchPlan } = useQuery<Plan | null>({
+    queryKey: ["therapist", "plan", id],
+    queryFn: () => api.get<Plan | null>(`/plans/patient/${id}/current`),
+  });
 
-  useEffect(() => {
-    loadPlan();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  const { data: availableTasks = [] } = useQuery<Task[]>({
+    queryKey: ["therapist", "plan-tasks", plan?.plan_id],
+    queryFn: () => api.get<Task[]>(`/plans/${plan!.plan_id}/tasks-for-defects`),
+    enabled: !!plan?.plan_id,
+  });
+
+  const { data: revisionHistory = [] } = useQuery<PlanRevisionEntry[]>({
+    queryKey: ["therapist", "plan-revisions", plan?.plan_id],
+    queryFn: () => api.get<PlanRevisionEntry[]>(`/plans/${plan!.plan_id}/revision-history`).catch(() => [] as PlanRevisionEntry[]),
+    enabled: !!plan?.plan_id,
+  });
+
+  const moveMutation = useMutation({
+    mutationFn: ({ assignmentId, newDayIndex }: { assignmentId: string; newDayIndex: number }) =>
+      api.patch(`/plans/${plan!.plan_id}/tasks/${assignmentId}`, { day_index: newDayIndex }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["therapist", "plan", id] });
+      qc.invalidateQueries({ queryKey: ["therapist", "plan-revisions", plan?.plan_id] });
+      toast.success("Task moved.");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Move failed"),
+  });
+
+  const addMutation = useMutation({
+    mutationFn: ({ taskId, dayIndex }: { taskId: string; dayIndex: number }) =>
+      api.post<Assignment>(`/plans/${plan!.plan_id}/tasks`, { task_id: taskId, day_index: dayIndex }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["therapist", "plan", id] });
+      qc.invalidateQueries({ queryKey: ["therapist", "plan-revisions", plan?.plan_id] });
+      toast.success("Task added.");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Add failed"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (assignmentId: string) =>
+      api.delete(`/plans/${plan!.plan_id}/tasks/${assignmentId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["therapist", "plan", id] });
+      qc.invalidateQueries({ queryKey: ["therapist", "plan-revisions", plan?.plan_id] });
+      toast.success("Task removed.");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Delete failed"),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: () => api.post(`/plans/${plan!.plan_id}/approve`, {}),
+    onSuccess: () => {
+      toast.success("Plan approved and visible to patient.");
+      qc.invalidateQueries({ queryKey: ["therapist", "plan", id] });
+      qc.invalidateQueries({ queryKey: ["therapist", "dashboard"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Approval failed"),
+  });
 
   async function handleGenerate() {
     setGenerating(true);
     try {
-      const baseline = await api.get<{ level: string } | null>(
-        `/baseline/therapist-view/${id}`
-      );
-      const level =
-        (baseline as { level?: string } | null)?.level ?? "easy";
-      const newPlan = await api.post<Plan>("/plans/generate", {
-        patient_id: id,
-        baseline_level: level,
-      });
-      setPlan(newPlan);
-      const tasks = await api.get<Task[]>(
-        `/plans/${newPlan.plan_id}/tasks-for-defects`
-      );
-      setAvailableTasks(tasks);
+      const baseline = await api.get<{ level: string } | null>(`/baseline/therapist-view/${id}`);
+      const level = (baseline as { level?: string } | null)?.level ?? "easy";
+      await api.post<Plan>("/plans/generate", { patient_id: id, baseline_level: level });
+      await refetchPlan();
+      toast.success("New plan generated.");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Generation failed");
+      toast.error(e instanceof Error ? e.message : "Generation failed");
     } finally {
       setGenerating(false);
     }
   }
 
-  async function withMutationFeedback(fn: () => Promise<void>) {
-    setMutationState("saving");
-    try {
-      await fn();
-      setMutationState("saved");
-      setTimeout(() => setMutationState("idle"), 2000);
-    } catch (e: unknown) {
-      setMutationState("failed");
-      setError(e instanceof Error ? e.message : "Operation failed");
-    }
-  }
+  const isMutating = moveMutation.isPending || addMutation.isPending || deleteMutation.isPending;
+  const mutationState = isMutating ? "saving" : "idle";
 
-  async function handleMove(assignmentId: string, newDayIndex: number) {
-    if (!plan) return;
-    await withMutationFeedback(async () => {
-      await api.patch(`/plans/${plan.plan_id}/tasks/${assignmentId}`, {
-        day_index: newDayIndex,
-      });
-      setPlan((prev) =>
-        prev
-          ? {
-              ...prev,
-              assignments: prev.assignments.map((a) =>
-                a.assignment_id === assignmentId
-                  ? { ...a, day_index: newDayIndex }
-                  : a
-              ),
-            }
-          : prev
-      );
-    });
-  }
-
-  async function handleAdd(taskId: string, dayIndex: number) {
-    if (!plan) return;
-    await withMutationFeedback(async () => {
-      const newAssignment = await api.post<Assignment>(
-        `/plans/${plan.plan_id}/tasks`,
-        { task_id: taskId, day_index: dayIndex }
-      );
-      setPlan((prev) =>
-        prev
-          ? { ...prev, assignments: [...prev.assignments, newAssignment] }
-          : prev
-      );
-    });
-  }
-
-  async function handleDelete(assignmentId: string) {
-    if (!plan) return;
-    await withMutationFeedback(async () => {
-      await api.delete(`/plans/${plan.plan_id}/tasks/${assignmentId}`);
-      setPlan((prev) =>
-        prev
-          ? {
-              ...prev,
-              assignments: prev.assignments.filter(
-                (a) => a.assignment_id !== assignmentId
-              ),
-            }
-          : prev
-      );
-    });
-  }
-
-  async function handleApprove() {
-    if (!plan) return;
-    setApproving(true);
-    try {
-      await api.post(`/plans/${plan.plan_id}/approve`, {});
-      setPlan((prev) => (prev ? { ...prev, status: "approved" } : prev));
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Approval failed");
-    } finally {
-      setApproving(false);
-    }
-  }
-
-  if (loading) return <LoadingState label="Loading plan..." />;
-  if (error) return <ErrorState message={error} />;
+  if (isLoading) return <LoadingState label="Loading plan..." />;
+  if (error) return <ErrorState message={error instanceof Error ? error.message : "Failed to load"} />;
 
   return (
     <div className="space-y-6 animate-fade-up pt-4">
@@ -182,14 +135,8 @@ export default function PlanPage() {
                  {mutationState === "saving" && (
                    <span className="text-xs font-bold uppercase tracking-widest text-gray-500 border-2 border-gray-300 px-3 py-2">Saving...</span>
                  )}
-                 {mutationState === "saved" && (
-                   <span className="text-xs font-bold uppercase tracking-widest text-green-700 border-2 border-green-700 px-3 py-2">Saved ✓</span>
-                 )}
-                 {mutationState === "failed" && (
-                   <span className="text-xs font-bold uppercase tracking-widest text-red-700 border-2 border-red-700 px-3 py-2">Save Failed</span>
-                 )}
                  {plan.status === "approved" && <span className="bg-neo-primary border-4 border-neo-black px-4 py-2 font-black uppercase text-sm shadow-neo-sm text-neo-black flex items-center tracking-widest">APPROVED</span>}
-                 {plan.status === "draft" && <NeoButton onClick={handleApprove} disabled={approving} className="shadow-neo-sm bg-neo-primary text-neo-black tracking-widest hover:text-white">{approving ? "APPROVING..." : "APPROVE PLAN"}</NeoButton>}
+                 {plan.status === "draft" && <NeoButton onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending} className="shadow-neo-sm bg-neo-primary text-neo-black tracking-widest hover:text-white">{approveMutation.isPending ? "APPROVING..." : "APPROVE PLAN"}</NeoButton>}
                  <NeoButton variant="secondary" onClick={handleGenerate} disabled={generating} className="bg-neo-warning text-neo-black tracking-widest shadow-neo-sm hover:bg-neo-black hover:text-neo-warning transition-colors">
                     {generating ? "GENERATING..." : "🔄 REGENERATE"}
                  </NeoButton>
@@ -203,10 +150,34 @@ export default function PlanPage() {
           <KanbanBoard
             assignments={plan.assignments}
             availableTasks={availableTasks}
-            onMove={handleMove}
-            onAdd={handleAdd}
-            onDelete={handleDelete}
+            onMove={(assignmentId, newDayIndex) => moveMutation.mutateAsync({ assignmentId, newDayIndex }).then(() => undefined)}
+            onAdd={(taskId, dayIndex) => addMutation.mutateAsync({ taskId, dayIndex }).then(() => undefined)}
+            onDelete={(assignmentId) => deleteMutation.mutateAsync(assignmentId).then(() => undefined)}
           />
+
+          {revisionHistory.length > 0 && (
+            <div className="mt-6">
+              <button
+                onClick={() => setShowHistory((v) => !v)}
+                className="font-black uppercase tracking-widest text-sm border-4 border-neo-black px-4 py-2 bg-white hover:bg-neo-secondary transition-colors shadow-neo-sm"
+              >
+                {showHistory ? "Hide" : "Show"} Revision History ({revisionHistory.length})
+              </button>
+              {showHistory && (
+                <NeoCard className="mt-3 space-y-2 max-h-72 overflow-y-auto">
+                  {revisionHistory.map((entry) => (
+                    <div key={entry.id} className="flex items-start gap-3 border-b-2 border-gray-200 pb-2 last:border-0">
+                      <span className="border-2 border-neo-black px-2 py-0.5 text-xs font-black uppercase bg-neo-muted whitespace-nowrap">{entry.action}</span>
+                      <div className="flex-1 min-w-0">
+                        {entry.change_summary && <p className="text-xs font-medium text-gray-700 truncate">{entry.change_summary}</p>}
+                        <p className="text-xs text-gray-400">{new Date(entry.created_at).toLocaleString()}</p>
+                      </div>
+                    </div>
+                  ))}
+                </NeoCard>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

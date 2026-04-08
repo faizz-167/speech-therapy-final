@@ -1,7 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { Patient, Defect, ApproveRequest } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
@@ -14,59 +16,64 @@ import Link from "next/link";
 export default function PatientDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [patient, setPatient] = useState<Patient | null>(null);
-  const [defects, setDefects] = useState<Defect[]>([]);
+  const qc = useQueryClient();
   const [selectedDefects, setSelectedDefects] = useState<string[]>([]);
   const [primaryDiagnosis, setPrimaryDiagnosis] = useState("");
   const [clinicalNotes, setClinicalNotes] = useState("");
-  const [error, setError] = useState("");
-  const [successMsg, setSuccessMsg] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [approving, setApproving] = useState(false);
   const [validationMsg, setValidationMsg] = useState("");
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
-      api.get<Patient>(`/therapist/patients/${id}`),
-      api.get<Defect[]>("/therapist/defects"),
-    ]).then(([p, d]) => { setPatient(p); setDefects(d); })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [id]);
+  const { data: patient, error: patientError, isLoading: patientLoading } = useQuery<Patient>({
+    queryKey: ["therapist", "patient", id],
+    queryFn: () => api.get<Patient>(`/therapist/patients/${id}`),
+  });
 
-  async function handleApprove() {
-    if (selectedDefects.length === 0) { setValidationMsg("Select at least one defect"); return; }
-    setValidationMsg("");
-    setApproving(true);
-    try {
+  const { data: defects = [], isLoading: defectsLoading } = useQuery<Defect[]>({
+    queryKey: ["therapist", "defects"],
+    queryFn: () => api.get<Defect[]>("/therapist/defects"),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: async () => {
       const body: ApproveRequest = { defect_ids: selectedDefects };
       if (primaryDiagnosis.trim()) body.primary_diagnosis = primaryDiagnosis.trim();
       if (clinicalNotes.trim()) body.clinical_notes = clinicalNotes.trim();
       await api.post(`/therapist/patients/${id}/approve`, body);
-      const updated = await api.get<Patient>(`/therapist/patients/${id}`);
-      setPatient(updated);
-      setSuccessMsg("Patient approved successfully.");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed");
-    } finally { setApproving(false); }
-  }
+    },
+    onSuccess: () => {
+      toast.success("Patient approved successfully.");
+      qc.invalidateQueries({ queryKey: ["therapist", "patient", id] });
+      qc.invalidateQueries({ queryKey: ["therapist", "patients"] });
+      qc.invalidateQueries({ queryKey: ["therapist", "dashboard"] });
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : "Approval failed");
+    },
+  });
 
-  function handleReject() {
-    setShowRejectConfirm(true);
-  }
-
-  async function doReject() {
-    try {
-      await api.post(`/therapist/patients/${id}/reject`, {});
+  const rejectMutation = useMutation({
+    mutationFn: () => api.post(`/therapist/patients/${id}/reject`, {}),
+    onSuccess: () => {
+      toast.success("Patient rejected.");
+      qc.invalidateQueries({ queryKey: ["therapist", "patients"] });
+      qc.invalidateQueries({ queryKey: ["therapist", "dashboard"] });
       router.push("/therapist/patients");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed");
-    }
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : "Rejection failed");
+    },
+  });
+
+  function handleApprove() {
+    if (selectedDefects.length === 0) { setValidationMsg("Select at least one defect"); return; }
+    setValidationMsg("");
+    approveMutation.mutate();
   }
 
-  if (loading) return <LoadingState label="Loading patient details..." />;
-  if (error) return <ErrorState message={error} />;
+  const isLoading = patientLoading || defectsLoading;
+
+  if (isLoading) return <LoadingState label="Loading patient details..." />;
+  if (patientError) return <ErrorState message={patientError instanceof Error ? patientError.message : "Failed to load"} />;
   if (!patient) {
     return (
       <EmptyState
@@ -86,7 +93,7 @@ export default function PatientDetailPage() {
         confirmLabel="Reject"
         cancelLabel="Keep"
         dangerous
-        onConfirm={() => { setShowRejectConfirm(false); doReject(); }}
+        onConfirm={() => { setShowRejectConfirm(false); rejectMutation.mutate(); }}
         onCancel={() => setShowRejectConfirm(false)}
       />
       <h1 className="text-3xl font-black uppercase">{patient.full_name}</h1>
@@ -100,13 +107,13 @@ export default function PatientDetailPage() {
         </div>
         {(() => {
           const assignedDefectIds = patient.pre_assigned_defect_ids?.defect_ids ?? [];
-          const assignedDefects = defects.filter(d => assignedDefectIds.includes(d.defect_id));
-          if (assignedDefects.length === 0) return null;
+          const assignedDefectsList = defects.filter(d => assignedDefectIds.includes(d.defect_id));
+          if (assignedDefectsList.length === 0) return null;
           return (
             <div className="border-t-4 border-black pt-3 space-y-2">
               <p className="font-black uppercase text-xs text-gray-500">Assigned Conditions</p>
               <div className="flex flex-wrap gap-2">
-                {assignedDefects.map(d => (
+                {assignedDefectsList.map(d => (
                   <span key={d.defect_id} className="border-2 border-black px-3 py-1 text-sm font-bold bg-[#FFD93D]">
                     {d.name} <span className="text-xs font-medium text-gray-600">({d.category})</span>
                   </span>
@@ -116,12 +123,6 @@ export default function PatientDetailPage() {
           );
         })()}
       </NeoCard>
-
-      {successMsg && (
-        <div className="border-4 border-green-700 bg-green-50 px-4 py-3 font-bold text-green-800 text-sm">
-          {successMsg}
-        </div>
-      )}
 
       {patient.status === "pending" && (
         <NeoCard accent="secondary" className="space-y-4">
@@ -145,8 +146,9 @@ export default function PatientDetailPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="font-black uppercase text-xs">Primary Diagnosis</label>
+            <label htmlFor="primary-diagnosis" className="font-black uppercase text-xs">Primary Diagnosis</label>
             <input
+              id="primary-diagnosis"
               type="text"
               value={primaryDiagnosis}
               onChange={(e) => setPrimaryDiagnosis(e.target.value)}
@@ -156,8 +158,9 @@ export default function PatientDetailPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="font-black uppercase text-xs">Clinical Notes <span className="text-gray-500 font-medium normal-case">(optional)</span></label>
+            <label htmlFor="clinical-notes" className="font-black uppercase text-xs">Clinical Notes <span className="text-gray-500 font-medium normal-case">(optional)</span></label>
             <textarea
+              id="clinical-notes"
               value={clinicalNotes}
               onChange={(e) => setClinicalNotes(e.target.value)}
               placeholder="Any relevant clinical observations..."
@@ -170,10 +173,10 @@ export default function PatientDetailPage() {
             <p className="text-sm font-bold text-red-600">{validationMsg}</p>
           )}
           <div className="flex gap-3">
-            <NeoButton onClick={handleApprove} disabled={approving} className="flex-1">
-              {approving ? "Approving..." : "Approve"}
+            <NeoButton onClick={handleApprove} disabled={approveMutation.isPending} className="flex-1">
+              {approveMutation.isPending ? "Approving..." : "Approve"}
             </NeoButton>
-            <NeoButton variant="ghost" onClick={handleReject} className="flex-1">Reject</NeoButton>
+            <NeoButton variant="ghost" onClick={() => setShowRejectConfirm(true)} className="flex-1">Reject</NeoButton>
           </div>
         </NeoCard>
       )}

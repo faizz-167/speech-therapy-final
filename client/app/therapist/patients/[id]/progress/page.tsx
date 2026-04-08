@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { NeoCard } from "@/components/ui/NeoCard";
@@ -19,19 +19,15 @@ import { Progress } from "@/types";
 
 export default function TherapistPatientProgressPage() {
   const { id } = useParams<{ id: string }>();
-  const [data, setData] = useState<Progress | null>(null);
-  const [error, setError] = useState("");
 
-  useEffect(() => {
-    api
-      .get<Progress>(`/therapist/patients/${id}/progress`)
-      .then(setData)
-      .catch((e: Error) => setError(e.message));
-  }, [id]);
+  const { data, error, isLoading } = useQuery<Progress>({
+    queryKey: ["therapist", "patient-progress", id],
+    queryFn: () => api.get<Progress>(`/therapist/patients/${id}/progress`),
+  });
 
-  if (error) return <ErrorState message={error} />;
-  if (!data) return <LoadingState label="Loading patient progress..." />;
-  if (data.total_attempts === 0) {
+  if (isLoading) return <LoadingState label="Loading patient progress..." />;
+  if (error) return <ErrorState message={error instanceof Error ? error.message : "Failed to load"} />;
+  if (!data || data.total_attempts === 0) {
     return (
       <EmptyState
         icon="📉"

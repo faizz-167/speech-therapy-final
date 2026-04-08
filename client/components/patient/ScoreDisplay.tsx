@@ -13,13 +13,15 @@ export function ScoreDisplay({ score }: { score: AttemptScore }) {
           {score.final_score?.toFixed(1)}
           <span className="text-xl">/100</span>
         </div>
-        <div className="font-black uppercase text-lg">{isPassed ? "PASS" : "FAIL"}</div>
+        <div className="font-black uppercase text-lg">
+          {isPassed ? "✓ Great job!" : "↻ Not quite — keep going!"}
+        </div>
         {score.adaptive_decision && (
           <div className="text-sm font-bold border-2 border-black inline-block px-3 py-1 uppercase">
             {score.adaptive_decision === "advance"
               ? "⬆ Level Up!"
               : score.adaptive_decision === "drop"
-              ? "⬇ Level Down"
+              ? "⬇ Adjusting to easier level"
               : "→ Stay"}
           </div>
         )}

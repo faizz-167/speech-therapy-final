@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { UserRole } from "@/types/auth";
+import { queryClient } from "@/lib/queryClient";
 
 interface AuthState {
   token: string | null;
@@ -28,16 +29,22 @@ export const useAuthStore = create<AuthState>()(
       bootstrapped: false,
       sessionExpired: false,
       setAuth: (token, role, userId, fullName) =>
-        set({ token, role, userId, fullName, bootstrapped: false, sessionExpired: false }),
+        {
+          queryClient.clear();
+          set({ token, role, userId, fullName, bootstrapped: false, sessionExpired: false });
+        },
       clearAuth: () =>
-        set({
-          token: null,
-          role: null,
-          userId: null,
-          fullName: null,
-          bootstrapped: false,
-          sessionExpired: false,
-        }),
+        {
+          queryClient.clear();
+          set({
+            token: null,
+            role: null,
+            userId: null,
+            fullName: null,
+            bootstrapped: false,
+            sessionExpired: false,
+          });
+        },
       setHydrated: () => set({ hydrated: true }),
       setSessionExpired: (v) => set({ sessionExpired: v }),
       bootstrapAuth: async () => {

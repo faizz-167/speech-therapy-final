@@ -145,11 +145,17 @@ export function Recorder({ onRecordingComplete, disabled }: RecorderProps) {
       )}
       {recording ? (
         <>
-          <div className="text-[#FF6B6B] font-black animate-pulse text-lg">● RECORDING</div>
-          <NeoButton variant="ghost" onClick={stopRecording}>Stop Recording</NeoButton>
+          <div className="text-[#FF6B6B] font-black animate-pulse text-lg" role="status" aria-live="polite">
+            ● Recording in progress
+          </div>
+          <NeoButton variant="ghost" onClick={stopRecording} aria-label="Stop recording">
+            Stop Recording
+          </NeoButton>
         </>
       ) : (
-        <NeoButton onClick={startRecording}>Start Recording</NeoButton>
+        <NeoButton onClick={startRecording} aria-label="Start recording">
+          Start Recording
+        </NeoButton>
       )}
     </div>
   );

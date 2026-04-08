@@ -1,9 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
-import { createWebSocket } from "@/lib/ws";
+import { toast } from "@/lib/toast";
+import { createWebSocket, WebSocketHandle } from "@/lib/ws";
 import { AttemptScore, Prompt, PollResult, RecordingMeta, SessionPhase } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
@@ -14,82 +16,96 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 const NO_SPEECH_REASON = "No speech detected";
+const UPLOAD_TIMEOUT_MS = 30_000;
+const ANALYSIS_TIMEOUT_MS = 90_000;
 
 export default function ExercisePage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();
   const router = useRouter();
   const userId = useAuthStore((s) => s.userId);
-  const [prompts, setPrompts] = useState<Prompt[]>([]);
+
+  const [sessionError, setSessionError] = useState("");
   const [promptIdx, setPromptIdx] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>("instruction");
   const [score, setScore] = useState<AttemptScore | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [attemptNumber, setAttemptNumber] = useState<number | null>(null);
   const [noSpeech, setNoSpeech] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [wsReconnecting, setWsReconnecting] = useState(false);
+  const [wsFallback, setWsFallback] = useState(false);
 
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<WebSocketHandle | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Track the current attempt_id so WS events from previous attempts are ignored
   const currentAttemptIdRef = useRef<string | null>(null);
 
+  const { data: prompts = [], isLoading: promptsLoading, error: promptsError } = useQuery<Prompt[]>({
+    queryKey: ["exercise", "prompts", assignmentId],
+    queryFn: () => api.get<Prompt[]>(`/patient/tasks/${assignmentId}/prompts`),
+    retry: false,
+  });
+
+  const { data: sessionData, isLoading: sessionLoading, error: sessionLoadError } = useQuery<{ session_id: string }>({
+    queryKey: ["exercise", "session", assignmentId],
+    queryFn: () => api.post<{ session_id: string }>("/session/start", { assignment_id: assignmentId }),
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
+  });
+
+  const sessionId = sessionData?.session_id ?? null;
+  const isLoading = promptsLoading || sessionLoading;
+  const loadError = promptsError ?? sessionLoadError;
   const currentPrompt = prompts[promptIdx];
 
   useEffect(() => {
-    Promise.all([
-      api.post<{ session_id: string }>("/session/start", { assignment_id: assignmentId }),
-      api.get<Prompt[]>(`/patient/tasks/${assignmentId}/prompts`),
-    ])
-      .then(([session, p]) => {
-        setSessionId(session.session_id);
-        setPrompts(p);
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [assignmentId]);
+    if (sessionLoadError instanceof Error) {
+      setSessionError(sessionLoadError.message);
+    } else if (promptsError instanceof Error) {
+      setSessionError(promptsError.message);
+    } else {
+      setSessionError("");
+    }
+  }, [promptsError, sessionLoadError]);
 
+  // WebSocket setup
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       if (cancelled) return;
-      wsRef.current = createWebSocket(userId, (data) => {
-        // Only accept score events that match the currently active attempt
-        if (!currentAttemptIdRef.current || data.attempt_id !== currentAttemptIdRef.current) return;
-        if (pollIntervalRef.current !== null) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
+      wsRef.current = createWebSocket(
+        userId,
+        (data) => {
+          if (!currentAttemptIdRef.current || data.attempt_id !== currentAttemptIdRef.current) return;
+          clearAttemptTracking();
+          setWsReconnecting(false);
+          if (data.fail_reason === NO_SPEECH_REASON) {
+            setNoSpeech(true);
+            setPhase("scored");
+          } else {
+            setNoSpeech(false);
+            setScore(data);
+            setPhase("scored");
+          }
+        },
+        (attempt) => {
+          setWsReconnecting(true);
+          toast.info(`Reconnecting to score delivery... (attempt ${attempt}/${5})`);
+        },
+        () => {
+          setWsReconnecting(false);
+          setWsFallback(true);
         }
-        if (pollTimeoutRef.current !== null) {
-          clearTimeout(pollTimeoutRef.current);
-          pollTimeoutRef.current = null;
-        }
-        if (data.fail_reason === NO_SPEECH_REASON) {
-          setNoSpeech(true);
-          setPhase("scored");
-        } else {
-          setNoSpeech(false);
-          setScore(data);
-          setPhase("scored");
-        }
-      });
+      );
     }, 0);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
-      wsRef.current?.close();
+      wsRef.current?.disconnect();
       wsRef.current = null;
-      if (pollIntervalRef.current !== null) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      if (pollTimeoutRef.current !== null) {
-        clearTimeout(pollTimeoutRef.current);
-        pollTimeoutRef.current = null;
-      }
+      clearAttemptTracking();
     };
   }, [userId]);
 
@@ -115,10 +131,29 @@ export default function ExercisePage() {
     speechSynthesis.speak(utterance);
   }
 
+  function continueAfterAnalysisTimeout() {
+    clearAttemptTracking();
+    setScore(null);
+    setAttemptNumber(null);
+    setNoSpeech(false);
+
+    if (promptIdx < prompts.length - 1) {
+      setPromptIdx((i) => i + 1);
+      setPhase("instruction");
+      return;
+    }
+
+    void api.post(`/patient/tasks/${assignmentId}/complete`, {}).then(() => {
+      router.push("/patient/tasks");
+    });
+  }
+
   async function handleRecording(blob: Blob, meta: RecordingMeta) {
     if (!sessionId || !currentPrompt) return;
     setPhase("uploading");
     setNoSpeech(false);
+    setUploadError("");
+
     const form = new FormData();
     form.append("audio", blob, "recording.webm");
     form.append("prompt_id", currentPrompt.prompt_id);
@@ -128,10 +163,12 @@ export default function ExercisePage() {
     if (meta.speechStartAt) {
       form.append("speech_start_at", meta.speechStartAt);
     }
+
     try {
       const res = await api.upload<{ attempt_id: string; attempt_number: number }>(
         `/session/${sessionId}/attempt`,
-        form
+        form,
+        { timeout: UPLOAD_TIMEOUT_MS }
       );
       currentAttemptIdRef.current = res.attempt_id;
       setAttemptNumber(res.attempt_number);
@@ -152,17 +189,21 @@ export default function ExercisePage() {
             }
           }
         } catch {
-          // Keep the poll fallback alive until timeout or a WS event wins.
+          // Keep poll alive until timeout or WS wins
         }
       }, 2000);
 
       pollTimeoutRef.current = setTimeout(() => {
         clearAttemptTracking();
-        setPhase((p) => (p === "scoring" ? "timeout" : p));
-      }, 60000);
+        setPhase((p) => (p === "scoring" ? "analysis_timeout" : p));
+      }, ANALYSIS_TIMEOUT_MS);
     } catch (e: unknown) {
       clearAttemptTracking();
-      setError(e instanceof Error ? e.message : "Upload failed. Please try again.");
+      if (e instanceof Error && e.name === "AbortError") {
+        setUploadError("Upload timed out after 30 seconds. Please check your connection and try again.");
+      } else {
+        setUploadError(e instanceof Error ? e.message : "Upload failed. Please try again.");
+      }
       setPhase("error");
     }
   }
@@ -173,6 +214,15 @@ export default function ExercisePage() {
     setScore(null);
     setAttemptNumber(null);
     setPhase("instruction");
+  }
+
+  function retryAfterError() {
+    clearAttemptTracking();
+    setUploadError("");
+    setNoSpeech(false);
+    setScore(null);
+    setAttemptNumber(null);
+    setPhase("record");
   }
 
   function nextPrompt() {
@@ -190,39 +240,41 @@ export default function ExercisePage() {
     }
   }
 
-  if (loading) return <LoadingState label="Loading exercise..." />;
-  if (phase === "timeout") {
+  if (isLoading) return <LoadingState label="Loading exercise..." />;
+
+  if (phase === "analysis_timeout") {
+    return (
+      <NeoCard className="text-center py-8 space-y-4 max-w-2xl">
+        <div className="text-5xl">⏱️</div>
+        <p className="font-black text-xl uppercase">Analysis Is Taking Longer Than Expected</p>
+        <p className="text-sm font-medium text-gray-600">
+          Your attempt was saved — your therapist will be notified to review it.
+        </p>
+        <NeoButton
+          className="w-full"
+          onClick={() => {
+            continueAfterAnalysisTimeout();
+          }}
+        >
+          {promptIdx < prompts.length - 1 ? "Continue to Next Prompt" : "Complete Task"}
+        </NeoButton>
+      </NeoCard>
+    );
+  }
+
+  if (phase === "error") {
     return (
       <ErrorState
-        message="Analysis timed out. Please try this prompt again."
-        onRetry={() => {
-          setError("");
-          setNoSpeech(false);
-          setScore(null);
-          setAttemptNumber(null);
-          setPhase("record");
-        }}
+        message={uploadError || sessionError || (loadError instanceof Error ? loadError.message : "Something went wrong")}
+        onRetry={prompts.length > 0 ? retryAfterError : () => router.refresh()}
       />
     );
   }
-  if (error) {
-    return (
-      <ErrorState
-        message={error}
-        onRetry={
-          prompts.length > 0
-            ? () => {
-                setError("");
-                setNoSpeech(false);
-                setScore(null);
-                setAttemptNumber(null);
-                setPhase("record");
-              }
-            : () => router.refresh()
-        }
-      />
-    );
+
+  if (loadError) {
+    return <ErrorState message={loadError instanceof Error ? loadError.message : "Failed to load"} onRetry={() => router.refresh()} />;
   }
+
   if (!currentPrompt) {
     return (
       <EmptyState
@@ -248,6 +300,16 @@ export default function ExercisePage() {
           )}
         </div>
         <div className="flex items-center gap-3">
+          {wsReconnecting && (
+            <span className="text-xs font-bold text-orange-600 border-2 border-orange-400 px-2 py-1 animate-pulse">
+              Reconnecting…
+            </span>
+          )}
+          {wsFallback && !wsReconnecting && (
+            <span className="text-xs font-bold text-gray-500 border-2 border-gray-400 px-2 py-1">
+              Polling mode
+            </span>
+          )}
           {attemptNumber ? (
             <span className="font-bold text-sm border-4 border-black px-3 py-1">
               Attempt {attemptNumber}
@@ -313,10 +375,9 @@ export default function ExercisePage() {
       {phase === "scored" && noSpeech && (
         <NeoCard accent="accent" className="text-center py-8 space-y-4">
           <div className="text-5xl">🎙️</div>
-          <p className="font-black text-xl uppercase">No Speech Detected</p>
+          <p className="font-black text-xl uppercase">We Couldn&apos;t Hear You</p>
           <p className="text-sm font-medium text-gray-600">
-            We couldn&apos;t hear you clearly. Make sure your microphone is working and speak
-            directly into it when prompted.
+            We couldn&apos;t detect speech in your recording. Please try again in a quieter environment and speak directly into your microphone.
           </p>
           <NeoButton onClick={retryAfterNoSpeech} className="w-full">
             Try Again

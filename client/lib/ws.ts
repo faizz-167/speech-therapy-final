@@ -16,12 +16,17 @@ function resolveWsUrl(): string {
 }
 
 const WS_URL = resolveWsUrl();
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_DELAY_MS = 2000;
+const STABLE_CONNECTION_RESET_MS = 10000;
 
 export interface ScoreReadyPayload extends AttemptScore {
   attempt_id: string;
 }
 
 type ScoreHandler = (data: ScoreReadyPayload) => void;
+type ReconnectHandler = (attempt: number) => void;
+type FallbackHandler = () => void;
 
 function getToken(): string | null {
   return useAuthStore.getState().token;
@@ -32,22 +37,92 @@ function shouldSendTokenOnSocket(): boolean {
   return protocol === "wss:" || hostname === "localhost" || hostname === "127.0.0.1";
 }
 
-export function createWebSocket(patientId: string, onScore: ScoreHandler): WebSocket | null {
+export interface WebSocketHandle {
+  disconnect: () => void;
+}
+
+export function createWebSocket(
+  patientId: string,
+  onScore: ScoreHandler,
+  onReconnect?: ReconnectHandler,
+  onFallback?: FallbackHandler
+): WebSocketHandle | null {
   if (typeof window === "undefined") return null;
-  const token = getToken();
-  try {
-    const ws = new WebSocket(`${WS_URL}/ws/${patientId}`);
-    ws.onopen = () => {
-      if (token && shouldSendTokenOnSocket()) {
-        ws.send(JSON.stringify({ type: "auth", token }));
-      }
-    };
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "score_ready") onScore(data as ScoreReadyPayload);
-    };
-    return ws;
-  } catch {
-    return null;
+
+  let intentionalClose = false;
+  let reconnectAttempts = 0;
+  let ws: WebSocket | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let stableConnectionTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function sendAuth(socket: WebSocket) {
+    const token = getToken();
+    if (token && shouldSendTokenOnSocket()) {
+      socket.send(JSON.stringify({ type: "auth", token }));
+    }
   }
+
+  function connect() {
+    try {
+      ws = new WebSocket(`${WS_URL}/ws/${patientId}`);
+
+      ws.onopen = () => {
+        sendAuth(ws!);
+        if (stableConnectionTimer !== null) {
+          clearTimeout(stableConnectionTimer);
+        }
+        stableConnectionTimer = setTimeout(() => {
+          reconnectAttempts = 0;
+          stableConnectionTimer = null;
+        }, STABLE_CONNECTION_RESET_MS);
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "score_ready") onScore(data as ScoreReadyPayload);
+      };
+
+      ws.onclose = (evt) => {
+        if (intentionalClose) return;
+        if (stableConnectionTimer !== null) {
+          clearTimeout(stableConnectionTimer);
+          stableConnectionTimer = null;
+        }
+        // Only reconnect on unexpected closes
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          reconnectAttempts++;
+          onReconnect?.(reconnectAttempts);
+          reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS);
+        } else {
+          onFallback?.();
+        }
+      };
+    } catch {
+      if (!intentionalClose && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        reconnectAttempts++;
+        onReconnect?.(reconnectAttempts);
+        reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS);
+      } else {
+        onFallback?.();
+      }
+    }
+  }
+
+  connect();
+
+  return {
+    disconnect() {
+      intentionalClose = true;
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (stableConnectionTimer !== null) {
+        clearTimeout(stableConnectionTimer);
+        stableConnectionTimer = null;
+      }
+      ws?.close();
+      ws = null;
+    },
+  };
 }
