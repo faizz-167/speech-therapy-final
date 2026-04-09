@@ -124,16 +124,76 @@ def _as_int(value, default: int = 0) -> int:
         return default
 
 
+def _parse_target_phonemes(value) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, dict):
+        phonemes = value.get("phonemes") or value.get("target_sounds") or []
+        return [str(item) for item in phonemes if item]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if item]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return []
+
+
+def _build_emotion_weight_map(row) -> dict[str, float]:
+    if not row:
+        return {}
+    return {
+        "happy": _as_float(row[0]),
+        "excited": _as_float(row[1]),
+        "neutral": _as_float(row[2]),
+        "surprised": _as_float(row[3]),
+        "sad": _as_float(row[4]),
+        "angry": _as_float(row[5]),
+        "fearful": _as_float(row[6]),
+        "positive_affect": _as_float(row[7]),
+        "focused": _as_float(row[8]),
+    }
+
+
+def _score_emotion_with_config(emotion_result: dict, emotion_weights_row) -> float:
+    raw_emotion_score = _as_float(emotion_result.get("emotion_score"))
+    dominant_emotion = emotion_result.get("dominant_emotion")
+    if not dominant_emotion or emotion_weights_row is None:
+        return raw_emotion_score
+
+    weights = _build_emotion_weight_map(emotion_weights_row)
+    if not weights:
+        return raw_emotion_score
+
+    confidence = _as_float(emotion_result.get("confidence"), default=raw_emotion_score / 100.0)
+
+    def _weighted_capacity(emotion_name: str) -> float:
+        score = weights.get(emotion_name, 0.0)
+        if emotion_name in {"happy", "excited", "surprised"}:
+            score += weights.get("positive_affect", 0.0)
+        if emotion_name == "neutral":
+            score += weights.get("focused", 0.0)
+        return score
+
+    numerator = _weighted_capacity(dominant_emotion)
+    denominator = max(
+        (_weighted_capacity(name) for name in ("happy", "excited", "neutral", "surprised", "sad", "angry", "fearful")),
+        default=0.0,
+    )
+    if denominator <= 0.0:
+        return raw_emotion_score
+    weighted_score = confidence * (numerator / denominator) * 100.0
+    return round(min(100.0, max(0.0, weighted_score)), 2)
+
+
 _SCORE_INSERT_SQL = (
     "INSERT INTO attempt_score_detail ("
-    " detail_id, attempt_id, word_accuracy, phoneme_accuracy, fluency_score,"
+    " detail_id, attempt_id, word_accuracy, phoneme_accuracy, pa_available, fluency_score,"
     " disfluency_rate, pause_score, speech_rate_wpm, speech_rate_score, confidence_score,"
     " rl_score, tc_score, aq_score, behavioral_score, dominant_emotion, emotion_score,"
     " engagement_score, speech_score, final_score, adaptive_decision, pass_fail,"
     " fail_reason, performance_level, low_confidence_flag, review_recommended, asr_transcript, audio_duration_sec,"
     " target_phoneme_results, created_at"
     ") VALUES ("
-    " %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()"
+    " %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()"
     ")"
 )
 
@@ -146,7 +206,7 @@ def _build_ws_payload(
     attempt_id: str,
     attempt_number: int,
     transcript: str,
-    wa: float, pa: float, fs: float,
+    wa: float, pa: float | None, pa_available: bool, fs: float,
     wpm: int, srs: float, cs: float,
     speech_score: float, behavioral_score: float, engagement_score: float,
     final_score: float, pass_fail: str, adaptive_decision: str,
@@ -167,6 +227,7 @@ def _build_ws_payload(
         "engagement_score": engagement_score,
         "word_accuracy": wa,
         "phoneme_accuracy": pa,
+        "pa_available": pa_available,
         "fluency_score": fs,
         "speech_rate_wpm": wpm,
         "speech_rate_score": srs,
@@ -397,7 +458,7 @@ def analyze_attempt(self, attempt_id):
         cur.execute(
             "SELECT spa.attempt_id, spa.attempt_number, spa.session_id, spa.prompt_id, spa.audio_file_path,"
             " spa.mic_activated_at, spa.speech_start_at, spa.task_mode, spa.prompt_type,"
-            " p.display_content, p.target_response, p.level_id,"
+            " p.display_content, p.target_response, p.level_id, p.target_phonemes,"
             " p.target_word_count, p.target_duration_sec, p.aq_relevance_threshold,"
             " p.speech_target,"
             " tl.task_id,"
@@ -416,7 +477,7 @@ def analyze_attempt(self, attempt_id):
         (
             attempt_id_db, attempt_number, session_id, prompt_id, audio_path,
             mic_at, speech_at, task_mode, prompt_type,
-            display_content, target_response, level_id,
+            display_content, target_response, level_id, prompt_target_phonemes,
             target_word_count, target_duration_sec, aq_threshold,
             speech_target, task_id, patient_id, plan_id,
         ) = row
@@ -535,7 +596,7 @@ def analyze_attempt(self, attempt_id):
             _exec_insert_score_detail(
                 cur,
                 (
-                    str(uuid.uuid4()), attempt_id, 0.0, 0.0, 0.0,
+                    str(uuid.uuid4()), attempt_id, 0.0, None, False, 0.0,
                     0.0, 0.0, 0, 0.0, 0.0,
                     0.0, 0.0, 0.0, 0.0, "neutral", 0.0,
                     0.0, 0.0, 0.0, adaptive_decision, "fail",
@@ -562,7 +623,7 @@ def analyze_attempt(self, attempt_id):
                 f"ws:patient:{patient_id}",
                 json.dumps(_build_ws_payload(
                     attempt_id, attempt_number, transcript,
-                    0.0, 0.0, 0.0, 0, 0.0, 0.0,
+                    0.0, None, False, 0.0, 0, 0.0, 0.0,
                     0.0, 0.0, 0.0,
                     0.0, "fail", adaptive_decision, "needs_improvement", "neutral",
                     True, "No speech detected",
@@ -570,36 +631,42 @@ def analyze_attempt(self, attempt_id):
             )
             return
 
-        phoneme_result = align_phonemes(audio_path, transcript)
+        target_phonemes = _parse_target_phonemes(prompt_target_phonemes)
+        phoneme_result = align_phonemes(
+            audio_path,
+            transcript,
+            target_phonemes=target_phonemes,
+            reference_text=target_text,
+        )
         disfluency_result = score_disfluency(transcript, duration)
         emotion_result = classify_emotion(audio_path)
 
         wpm = _as_float((len(transcript.split()) / duration * 60) if duration > 0 else 0)
-        # When no target text is available we cannot penalise word accuracy —
-        # use a neutral value so the overall score reflects only speech quality.
-        if target_text:
+        wa_available = bool(target_text)
+        if wa_available:
             wa = _as_float(_compute_word_accuracy(transcript, target_text), default=0.0)
         else:
-            wa = 75.0
-        pa = _as_float(phoneme_result["phoneme_accuracy"], default=70.0)
+            wa = 0.0
+        pa_available = bool(phoneme_result.get("inference_ok"))
+        pa = _as_float(phoneme_result.get("phoneme_accuracy"), default=0.0) if pa_available else None
         fs = _as_float(disfluency_result["fluency_score"], default=50.0)
         srs = _as_float(_compute_speech_rate_score(wpm, ideal_wpm_min, ideal_wpm_max, wpm_tolerance))
         cs = _as_float(min(100.0, avg_confidence * 100))
         rl_score = _as_float(_compute_rl_score(str(mic_at) if mic_at else None, str(speech_at) if speech_at else None), default=70.0)
         tc_score = _as_float(_compute_tc_score(transcript, target_word_count, target_duration_sec, duration), default=80.0)
         aq_score = _as_float(_compute_aq_score(transcript), default=30.0)
-        emotion_score = _as_float(emotion_result["emotion_score"], default=60.0)
-        engagement_score = _as_float(emotion_result["engagement_score"], default=60.0)
-        dominant_emotion = emotion_result["dominant_emotion"]
+        emotion_score = _score_emotion_with_config(emotion_result, emotion_weights_row)
+        dominant_emotion = emotion_result.get("dominant_emotion")
 
         scores = score_attempt(
             pa=pa, wa=wa, fs=fs, srs=srs, cs=cs,
             rl_score=rl_score, tc_score=tc_score, aq_score=aq_score,
-            emotion_score=emotion_score, weights=weights,
+            emotion_score=emotion_score, pa_available=pa_available,
+            wa_available=wa_available, weights=weights,
         )
 
         # Override PA cap threshold with defect-specific threshold if available
-        if defect_pa_min is not None and pa < defect_pa_min:
+        if pa_available and defect_pa_min is not None and pa is not None and pa < defect_pa_min:
             final_score_override = min(scores["final_score"], weights.rule_severe_pa_score_cap)
             scores = {**scores, "final_score": round(final_score_override, 2)}
             scores["adaptive_decision"] = "drop"
@@ -615,6 +682,7 @@ def analyze_attempt(self, attempt_id):
             scores = {**scores, "adaptive_decision": "stay"}
 
         behavioral_score = _as_float(scores["behavioral_score"])
+        engagement_score = _as_float(scores["engagement_score"])
         speech_score = _as_float(scores["speech_score"])
         final_score = _as_float(scores["final_score"])
         adaptive_decision = scores["adaptive_decision"]
@@ -627,6 +695,7 @@ def analyze_attempt(self, attempt_id):
             fail_reason = "ASR transcript needs review"
         disfluency_rate = _as_float(disfluency_result["disfluency_rate"])
         pause_score = _as_float(disfluency_result["pause_score"])
+        target_phoneme_results = json.dumps(phoneme_result.get("target_phoneme_results") or {})
 
         conn = _get_conn()
         cur = conn.cursor()
@@ -634,13 +703,13 @@ def analyze_attempt(self, attempt_id):
         _exec_insert_score_detail(
             cur,
             (
-                str(uuid.uuid4()), attempt_id, wa, pa, fs,
+                str(uuid.uuid4()), attempt_id, wa, pa, pa_available, fs,
                 disfluency_rate, pause_score,
                 wpm_int, srs, cs,
                 rl_score, tc_score, aq_score, behavioral_score, dominant_emotion, emotion_score,
                 engagement_score, speech_score, final_score, adaptive_decision, pass_fail,
                 fail_reason, performance_level, low_confidence, review_recommended, transcript, duration,
-                "{}",
+                target_phoneme_results,
             ),
         )
         cur.execute(
@@ -663,7 +732,7 @@ def analyze_attempt(self, attempt_id):
             f"ws:patient:{patient_id}",
             json.dumps(_build_ws_payload(
                 attempt_id, attempt_number, transcript,
-                wa, pa, fs, wpm_int, srs, cs,
+                wa, pa, pa_available, fs, wpm_int, srs, cs,
                 speech_score, behavioral_score, engagement_score,
                 final_score, pass_fail, adaptive_decision, performance_level, dominant_emotion,
                 review_recommended, fail_reason,

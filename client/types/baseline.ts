@@ -32,6 +32,7 @@ export interface AttemptResult {
   computed_score: number | null;
   word_accuracy: number | null;
   phoneme_accuracy: number | null;
+  pa_available: boolean | null;
   fluency_score: number | null;
   speech_rate_wpm: number | null;
   speech_rate_score: number | null;
@@ -56,6 +57,7 @@ export interface BaselineItemDetail {
   transcript: string | null;
   word_accuracy: number | null;
   phoneme_accuracy: number | null;
+  pa_available: boolean | null;
   fluency_score: number | null;
   speech_rate_wpm: number | null;
   speech_rate_score: number | null;

@@ -30,9 +30,9 @@ EXCLUDED_FORMULA_MODES = {"clinician_rated"}
 
 
 def score_to_level(score: float) -> str:
-    if score >= 80:
+    if score >= 75:
         return "advanced"
-    if score >= 70:
+    if score >= 60:
         return "intermediate"
     return "beginner"
 
@@ -198,6 +198,7 @@ async def poll_baseline_attempt(
         "computed_score": float(attempt.computed_score) if attempt.computed_score is not None else None,
         "word_accuracy": float(attempt.ml_word_accuracy) if attempt.ml_word_accuracy is not None else None,
         "phoneme_accuracy": float(attempt.ml_phoneme_accuracy) if attempt.ml_phoneme_accuracy is not None else None,
+        "pa_available": bool(attempt.pa_available) if attempt.pa_available is not None else None,
         "fluency_score": float(attempt.ml_fluency_score) if attempt.ml_fluency_score is not None else None,
         "speech_rate_wpm": float(attempt.ml_speech_rate_wpm) if attempt.ml_speech_rate_wpm is not None else None,
         "speech_rate_score": float(attempt.ml_speech_rate_score) if attempt.ml_speech_rate_score is not None else None,
@@ -400,6 +401,11 @@ async def therapist_get_baseline_items(
             phoneme_accuracy=(
                 float(attempts_by_item[item.item_id].ml_phoneme_accuracy)
                 if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_phoneme_accuracy is not None
+                else None
+            ),
+            pa_available=(
+                bool(attempts_by_item[item.item_id].pa_available)
+                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].pa_available is not None
                 else None
             ),
             fluency_score=(

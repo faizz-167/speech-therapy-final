@@ -90,6 +90,7 @@ function toBaselineAttemptScore(attemptResult: AttemptResult): AttemptScore {
     attempt_number: null,
     word_accuracy: attemptResult.word_accuracy,
     phoneme_accuracy: attemptResult.phoneme_accuracy,
+    pa_available: attemptResult.pa_available,
     fluency_score: attemptResult.fluency_score,
     speech_rate_wpm: attemptResult.speech_rate_wpm,
     speech_rate_score: attemptResult.speech_rate_score,

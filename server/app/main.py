@@ -52,8 +52,37 @@ async def ensure_schema_tables() -> None:
             "ADD COLUMN IF NOT EXISTS engagement_score NUMERIC"
         )
         await conn.exec_driver_sql(
+            "ALTER TABLE IF EXISTS baseline_attempt "
+            "ADD COLUMN IF NOT EXISTS pa_available BOOLEAN"
+        )
+        await conn.exec_driver_sql(
+            "UPDATE baseline_attempt "
+            "SET pa_available = (ml_phoneme_accuracy IS NOT NULL) "
+            "WHERE pa_available IS NULL"
+        )
+        await conn.exec_driver_sql(
+            "ALTER TABLE IF EXISTS attempt_score_detail "
+            "ADD COLUMN IF NOT EXISTS pa_available BOOLEAN"
+        )
+        await conn.exec_driver_sql(
+            "UPDATE attempt_score_detail "
+            "SET pa_available = (phoneme_accuracy IS NOT NULL) "
+            "WHERE pa_available IS NULL"
+        )
+        await conn.exec_driver_sql(
             "ALTER TABLE IF EXISTS patient_baseline_result "
             "ADD COLUMN IF NOT EXISTS session_id UUID"
+        )
+        await conn.exec_driver_sql(
+            "UPDATE task_scoring_weights "
+            "SET adaptive_advance_threshold = 75.0, "
+            "    adaptive_stay_min = 60.0, "
+            "    adaptive_stay_max = 74.0, "
+            "    adaptive_drop_threshold = 60.0 "
+            "WHERE adaptive_advance_threshold IS DISTINCT FROM 75.0 "
+            "   OR adaptive_stay_min IS DISTINCT FROM 60.0 "
+            "   OR adaptive_stay_max IS DISTINCT FROM 74.0 "
+            "   OR adaptive_drop_threshold IS DISTINCT FROM 60.0"
         )
 
 @app.get("/health")

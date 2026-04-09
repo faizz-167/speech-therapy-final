@@ -52,6 +52,7 @@ class AttemptScoreDetail(Base):
     attempt_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("session_prompt_attempt.attempt_id"), unique=True)
     word_accuracy: Mapped[float | None] = mapped_column(Numeric)
     phoneme_accuracy: Mapped[float | None] = mapped_column(Numeric)
+    pa_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     fluency_score: Mapped[float | None] = mapped_column(Numeric)
     disfluency_rate: Mapped[float | None] = mapped_column(Numeric)
     pause_score: Mapped[float | None] = mapped_column(Numeric)

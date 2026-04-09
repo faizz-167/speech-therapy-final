@@ -55,6 +55,7 @@ class BaselineItemDetailOut(BaseModel):
     transcript: Optional[str]
     word_accuracy: Optional[float] = None
     phoneme_accuracy: Optional[float]
+    pa_available: Optional[bool] = None
     fluency_score: Optional[float]
     speech_rate_wpm: Optional[float] = None
     speech_rate_score: Optional[float] = None

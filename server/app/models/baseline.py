@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone, date
-from sqlalchemy import String, Integer, Text, ForeignKey, Numeric, TIMESTAMP, Date, UniqueConstraint
+from sqlalchemy import String, Integer, Text, ForeignKey, Numeric, TIMESTAMP, Date, UniqueConstraint, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -112,6 +112,7 @@ class BaselineAttempt(Base):
     audio_file_path: Mapped[str | None] = mapped_column(String, nullable=True)
     result: Mapped[str] = mapped_column(String, default="pending")  # pending | scored | failed
     ml_phoneme_accuracy: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    pa_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     ml_word_accuracy: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     ml_fluency_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     ml_speech_rate_wpm: Mapped[int | None] = mapped_column(Integer, nullable=True)

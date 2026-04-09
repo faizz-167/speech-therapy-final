@@ -226,8 +226,9 @@ async def poll_attempt(
         if detail:
             score = {
                 "attempt_number": attempt.attempt_number,
-                "word_accuracy": float(detail.word_accuracy or 0),
-                "phoneme_accuracy": float(detail.phoneme_accuracy or 0),
+                "word_accuracy": float(detail.word_accuracy) if detail.word_accuracy is not None else None,
+                "phoneme_accuracy": float(detail.phoneme_accuracy) if detail.phoneme_accuracy is not None else None,
+                "pa_available": bool(detail.pa_available) if detail.pa_available is not None else None,
                 "fluency_score": float(detail.fluency_score or 0),
                 "speech_rate_wpm": detail.speech_rate_wpm,
                 "speech_rate_score": float(detail.speech_rate_score or 0),

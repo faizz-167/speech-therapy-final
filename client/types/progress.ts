@@ -8,6 +8,8 @@ export interface TaskMetric {
   task_id: string;
   task_name: string;
   overall_accuracy: number;
+  avg_phoneme_accuracy: number | null;
+  phoneme_accuracy_count: number;
   total_attempts: number;
   current_level: string | null;
   pass_rate: number;
@@ -17,6 +19,8 @@ export interface TaskMetric {
 export interface Progress {
   total_attempts: number;
   avg_final_score: number;
+  avg_phoneme_accuracy: number | null;
+  phoneme_accuracy_count: number;
   pass_rate: number;
   weekly_trend: WeeklyPoint[];
   task_metrics: TaskMetric[];

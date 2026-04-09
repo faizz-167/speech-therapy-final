@@ -36,22 +36,55 @@ def _compute_speech_rate_score(wpm: float, ideal_min: int = 80, ideal_max: int =
     return max(0.0, 100.0 - (diff / tolerance) * 30)
 
 
-def _baseline_score(formula_mode: str, pa: float, wa: float, fs: float,
-                    wpm: float, formula_weights: dict | None, wpm_range: dict | None) -> float:
+def _weighted_score(components: list[tuple[float, float, bool]]) -> float:
+    active = [(value, weight) for value, weight, available in components if available and weight > 0]
+    if not active:
+        return 0.0
+    total_weight = sum(weight for _, weight in active)
+    if total_weight <= 0:
+        return 0.0
+    return sum(value * weight for value, weight in active) / total_weight
+
+
+def _parse_target_phonemes(value) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if item]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return []
+
+
+def _baseline_score(formula_mode: str, pa: float | None, wa: float, fs: float,
+                    wpm: float, formula_weights: dict | None, wpm_range: dict | None,
+                    pa_available: bool = True, wa_available: bool = True) -> float:
     """Compute a 0–100 baseline score according to formula_mode."""
     if formula_mode == "auto_phoneme_only":
         fw = formula_weights or {"pa": 0.80, "wa": 0.20}
-        score = pa * fw.get("pa", 0.80) + wa * fw.get("wa", 0.20)
+        score = _weighted_score([
+            (pa if pa is not None else 0.0, fw.get("pa", 0.80), pa_available),
+            (wa, fw.get("wa", 0.20), wa_available),
+        ])
     elif formula_mode == "auto_simple":
         fw = formula_weights or {"pa": 0.50, "wa": 0.30, "fs": 0.20}
-        score = pa * fw.get("pa", 0.50) + wa * fw.get("wa", 0.30) + fs * fw.get("fs", 0.20)
+        score = _weighted_score([
+            (pa if pa is not None else 0.0, fw.get("pa", 0.50), pa_available),
+            (wa, fw.get("wa", 0.30), wa_available),
+            (fs, fw.get("fs", 0.20), True),
+        ])
         if wpm_range:
             ideal_min = wpm_range.get("min", 0)
             ideal_max = wpm_range.get("max", 999)
             if wpm > 0 and not (ideal_min <= wpm <= ideal_max):
                 score = max(0.0, score - 10.0)
     else:
-        score = (pa + wa) / 2.0
+        components = []
+        if pa_available and pa is not None:
+            components.append(pa)
+        if wa_available:
+            components.append(wa)
+        score = sum(components) / len(components) if components else 0.0
     return round(min(100.0, max(0.0, score)), 2)
 
 
@@ -70,7 +103,7 @@ def analyze_baseline_attempt(self, attempt_id: str):
 
         cur.execute(
             "SELECT ba.attempt_id, ba.audio_file_path, ba.item_id,"
-            " bi.formula_mode, bi.formula_weights, bi.wpm_range, bi.expected_output"
+            " bi.formula_mode, bi.formula_weights, bi.wpm_range, bi.expected_output, bi.target_phoneme"
             " FROM baseline_attempt ba"
             " JOIN baseline_item bi ON bi.item_id = ba.item_id"
             " WHERE ba.attempt_id = %s",
@@ -80,7 +113,7 @@ def analyze_baseline_attempt(self, attempt_id: str):
         if not row:
             return
 
-        attempt_id_db, audio_path, item_id, formula_mode, formula_weights, wpm_range, expected_output = row
+        attempt_id_db, audio_path, item_id, formula_mode, formula_weights, wpm_range, expected_output, target_phoneme = row
 
         if not audio_path or not os.path.exists(audio_path):
             cur.execute(
@@ -98,39 +131,57 @@ def analyze_baseline_attempt(self, attempt_id: str):
         duration = _as_float(asr["duration"])
         avg_confidence = _as_float(asr["avg_confidence"])
 
-        phoneme_result = align_phonemes(audio_path, transcript)
+        phoneme_result = align_phonemes(
+            audio_path,
+            transcript,
+            target_phonemes=_parse_target_phonemes(target_phoneme),
+            reference_text=expected_output,
+        )
         disfluency_result = score_disfluency(transcript, duration)
         emotion_result = classify_emotion(audio_path)
 
-        pa = _as_float(phoneme_result["phoneme_accuracy"], 70.0)
+        pa_available = bool(phoneme_result.get("inference_ok"))
+        pa = _as_float(phoneme_result.get("phoneme_accuracy"), 0.0) if pa_available else None
         fs = _as_float(disfluency_result["fluency_score"], 50.0)
         wpm = _as_float((len(transcript.split()) / duration * 60) if duration > 0 else 0)
         speech_rate_score = _compute_speech_rate_score(wpm)
-        dominant_emotion = emotion_result.get("dominant_emotion") or "neutral"
-        emotion_score = _as_float(emotion_result.get("emotion_score"), 60.0)
-        engagement_score = _as_float(emotion_result.get("engagement_score"), 60.0)
+        dominant_emotion = emotion_result.get("dominant_emotion")
+        emotion_score = _as_float(emotion_result.get("emotion_score"), 0.0)
+        engagement_score = _as_float(emotion_result.get("engagement_score"), 0.0)
 
-        wa = 75.0
-        if expected_output and transcript:
+        wa_available = bool(expected_output)
+        wa = 0.0
+        if wa_available and transcript:
             target_words = {w.strip(".,!?;:").lower() for w in expected_output.split()}
             spoken_words = {w.strip(".,!?;:").lower() for w in transcript.split()}
             if target_words:
                 wa = round(len(target_words & spoken_words) / len(target_words) * 100, 2)
 
-        computed = _baseline_score(formula_mode or "auto_simple", pa, wa, fs, wpm, formula_weights, wpm_range)
+        computed = _baseline_score(
+            formula_mode or "auto_simple",
+            pa,
+            wa,
+            fs,
+            wpm,
+            formula_weights,
+            wpm_range,
+            pa_available=pa_available,
+            wa_available=wa_available,
+        )
         wpm_int = int(round(wpm))
 
         conn = _get_conn()
         cur = conn.cursor()
         cur.execute(
             "UPDATE baseline_attempt"
-            " SET result='scored', ml_phoneme_accuracy=%s, ml_word_accuracy=%s,"
+            " SET result='scored', ml_phoneme_accuracy=%s, pa_available=%s, ml_word_accuracy=%s,"
             " ml_fluency_score=%s, ml_speech_rate_wpm=%s, ml_speech_rate_score=%s,"
             " ml_confidence=%s, dominant_emotion=%s, emotion_score=%s, engagement_score=%s,"
             " asr_transcript=%s, computed_score=%s"
             " WHERE attempt_id=%s",
             (
                 pa,
+                pa_available,
                 wa,
                 fs,
                 wpm_int,

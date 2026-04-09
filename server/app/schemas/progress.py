@@ -12,6 +12,8 @@ class TaskMetric(BaseModel):
     task_id: str
     task_name: str
     overall_accuracy: float
+    avg_phoneme_accuracy: Optional[float]
+    phoneme_accuracy_count: int
     total_attempts: int
     current_level: Optional[str]
     pass_rate: float
@@ -21,6 +23,8 @@ class TaskMetric(BaseModel):
 class ProgressResponse(BaseModel):
     total_attempts: int
     avg_final_score: float
+    avg_phoneme_accuracy: Optional[float]
+    phoneme_accuracy_count: int
     pass_rate: float
     weekly_trend: list[WeeklyPoint]
     task_metrics: list[TaskMetric]

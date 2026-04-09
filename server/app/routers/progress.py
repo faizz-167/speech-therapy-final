@@ -28,6 +28,8 @@ async def _build_progress(patient_id: str, db: AsyncSession) -> ProgressResponse
         return ProgressResponse(
             total_attempts=0,
             avg_final_score=0,
+            avg_phoneme_accuracy=None,
+            phoneme_accuracy_count=0,
             pass_rate=0,
             weekly_trend=[],
             task_metrics=[],
@@ -35,6 +37,13 @@ async def _build_progress(patient_id: str, db: AsyncSession) -> ProgressResponse
         )
 
     scores = [float(r.AttemptScoreDetail.final_score or 0) for r in rows]
+    valid_pa_scores = [
+        float(r.AttemptScoreDetail.phoneme_accuracy)
+        for r in rows
+        if (r.AttemptScoreDetail.pa_available is True or (
+            r.AttemptScoreDetail.pa_available is None and r.AttemptScoreDetail.phoneme_accuracy is not None
+        )) and r.AttemptScoreDetail.phoneme_accuracy is not None
+    ]
     passes = sum(1 for r in rows if r.AttemptScoreDetail.pass_fail == "pass")
     emotions = [
         r.AttemptScoreDetail.dominant_emotion
@@ -58,13 +67,19 @@ async def _build_progress(patient_id: str, db: AsyncSession) -> ProgressResponse
         task_id = r.task_id
         rollup = task_rollups.setdefault(
             task_id,
-            {"total": 0, "passes": 0, "last_result": None},
+            {"total": 0, "passes": 0, "last_result": None, "pa_total": 0.0, "pa_count": 0},
         )
         rollup["total"] = int(rollup["total"] or 0) + 1
         if r.AttemptScoreDetail.pass_fail == "pass":
             rollup["passes"] = int(rollup["passes"] or 0) + 1
         if rollup["last_result"] is None:
             rollup["last_result"] = r.AttemptScoreDetail.pass_fail
+        if (
+            r.AttemptScoreDetail.phoneme_accuracy is not None
+            and (r.AttemptScoreDetail.pa_available is True or r.AttemptScoreDetail.pa_available is None)
+        ):
+            rollup["pa_total"] = float(rollup["pa_total"] or 0.0) + float(r.AttemptScoreDetail.phoneme_accuracy)
+            rollup["pa_count"] = int(rollup["pa_count"] or 0) + 1
 
     progress_result = await db.execute(
         select(PatientTaskProgress).where(PatientTaskProgress.patient_id == patient_id)
@@ -77,11 +92,15 @@ async def _build_progress(patient_id: str, db: AsyncSession) -> ProgressResponse
         rollup = task_rollups.get(pr.task_id, {})
         total = int(rollup.get("total", pr.total_attempts) or 0)
         passes_for_task = int(rollup.get("passes", 0) or 0)
+        pa_total = float(rollup.get("pa_total", 0.0) or 0.0)
+        pa_count = int(rollup.get("pa_count", 0) or 0)
         task_metrics.append(
             TaskMetric(
                 task_id=pr.task_id,
                 task_name=task.name if task else pr.task_id,
                 overall_accuracy=float(pr.overall_accuracy or 0),
+                avg_phoneme_accuracy=round(pa_total / pa_count, 2) if pa_count else None,
+                phoneme_accuracy_count=pa_count,
                 total_attempts=pr.total_attempts,
                 current_level=level.level_name if level else None,
                 pass_rate=round((passes_for_task / total) * 100, 2) if total else 0,
@@ -92,6 +111,8 @@ async def _build_progress(patient_id: str, db: AsyncSession) -> ProgressResponse
     return ProgressResponse(
         total_attempts=len(scores),
         avg_final_score=round(sum(scores) / len(scores), 2),
+        avg_phoneme_accuracy=round(sum(valid_pa_scores) / len(valid_pa_scores), 2) if valid_pa_scores else None,
+        phoneme_accuracy_count=len(valid_pa_scores),
         pass_rate=round(passes / len(scores) * 100, 2),
         weekly_trend=weekly_trend,
         task_metrics=task_metrics,

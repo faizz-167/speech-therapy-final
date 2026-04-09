@@ -1,3 +1,5 @@
+# Install this environment with Python 3.13 for now.
+# Python 3.14 causes source-build failures with some pinned backend dependencies.
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 sqlalchemy[asyncio]==2.0.36

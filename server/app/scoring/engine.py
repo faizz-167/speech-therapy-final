@@ -17,8 +17,8 @@ class ScoringWeights:
     behavioral_w_tc: float = 0.35
     behavioral_w_aq: float = 0.25
     adaptive_advance_threshold: float = 75.0
-    adaptive_stay_min: float = 55.0
-    adaptive_drop_threshold: float = 55.0
+    adaptive_stay_min: float = 60.0
+    adaptive_drop_threshold: float = 60.0
     adaptive_consecutive_fail_limit: int = 3
     rule_low_eng_threshold: float = 35.0
     rule_low_eng_penalty: float = 5.0
@@ -28,6 +28,16 @@ class ScoringWeights:
     rule_severe_pa_score_cap: float = 45.0
     rule_low_conf_threshold: float = 0.50   # Whisper ASR quality gate
     adaptive_stay_max: float = 74.0         # Stay range ceiling
+
+
+def _weighted_score(components: list[tuple[float, float, bool]]) -> float:
+    active = [(value, weight) for value, weight, available in components if available and weight > 0]
+    if not active:
+        return 0.0
+    total_weight = sum(weight for _, weight in active)
+    if total_weight <= 0:
+        return 0.0
+    return sum(value * weight for value, weight in active) / total_weight
 
 
 def weights_from_db_row(row) -> "ScoringWeights":
@@ -46,8 +56,8 @@ def weights_from_db_row(row) -> "ScoringWeights":
         behavioral_w_tc=float(row.behavioral_w_tc),
         behavioral_w_aq=float(row.behavioral_w_aq),
         adaptive_advance_threshold=float(row.adaptive_advance_threshold),
-        adaptive_stay_min=float(row.adaptive_stay_min),
-        adaptive_drop_threshold=float(row.adaptive_drop_threshold),
+        adaptive_stay_min=60.0,
+        adaptive_drop_threshold=60.0,
         adaptive_consecutive_fail_limit=int(row.adaptive_consecutive_fail_limit),
         rule_low_eng_threshold=float(row.rule_low_eng_threshold),
         rule_low_eng_penalty=float(row.rule_low_eng_penalty),
@@ -56,12 +66,12 @@ def weights_from_db_row(row) -> "ScoringWeights":
         rule_severe_pa_threshold=float(row.rule_severe_pa_threshold),
         rule_severe_pa_score_cap=float(row.rule_severe_pa_score_cap),
         rule_low_conf_threshold=float(row.rule_low_conf_threshold) if row.rule_low_conf_threshold is not None else 0.50,
-        adaptive_stay_max=float(row.adaptive_stay_max) if row.adaptive_stay_max is not None else 74.0,
+        adaptive_stay_max=74.0,
     )
 
 
 def score_attempt(
-    pa: float,
+    pa: float | None,
     wa: float,
     fs: float,
     srs: float,
@@ -70,6 +80,8 @@ def score_attempt(
     tc_score: float,
     aq_score: float,
     emotion_score: float,
+    pa_available: bool = True,
+    wa_available: bool = True,
     weights: Optional[ScoringWeights] = None,
 ) -> dict:
     """
@@ -80,12 +92,14 @@ def score_attempt(
     if weights is None:
         weights = ScoringWeights()
 
-    speech_score = (
-        pa * weights.speech_w_pa
-        + wa * weights.speech_w_wa
-        + fs * weights.speech_w_fs
-        + srs * weights.speech_w_srs
-        + cs * weights.speech_w_cs
+    speech_score = _weighted_score(
+        [
+            (pa if pa is not None else 0.0, weights.speech_w_pa, pa_available),
+            (wa, weights.speech_w_wa, wa_available),
+            (fs, weights.speech_w_fs, True),
+            (srs, weights.speech_w_srs, True),
+            (cs, weights.speech_w_cs, True),
+        ]
     )
     speech_score = min(100.0, max(0.0, speech_score))
 
@@ -107,7 +121,7 @@ def score_attempt(
         + engagement_score * weights.fusion_w_engagement
     )
 
-    if pa < weights.rule_severe_pa_threshold:
+    if pa_available and pa is not None and pa < weights.rule_severe_pa_threshold:
         final_score = min(final_score, weights.rule_severe_pa_score_cap)
     if engagement_score < weights.rule_low_eng_threshold:
         final_score -= weights.rule_low_eng_penalty
@@ -116,11 +130,11 @@ def score_attempt(
 
     final_score = min(100.0, max(0.0, final_score))
 
-    if final_score >= weights.adaptive_advance_threshold:
+    if final_score >= 75.0:
         adaptive_decision = "advance"
         pass_fail = "pass"
         performance_level = "advanced"
-    elif final_score >= weights.adaptive_stay_min:
+    elif final_score >= 60.0:
         adaptive_decision = "stay"
         pass_fail = "pass"
         performance_level = "satisfactory"
