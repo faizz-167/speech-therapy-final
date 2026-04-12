@@ -17,10 +17,27 @@ from app.utils.session_notes import default_session_notes, parse_session_notes, 
 ```
 
 ### 6.2 — Add escalation 403 guard to `POST /session/start`
-**Location:** `start_session` handler, after the assignment/plan validation block and before the new session is created.
+**Critical placement detail:** The existing handler (lines 86–89) iterates sessions and **returns early** when it finds a matching non-completed session for the same `assignment_id`. An escalated session is not completed, so it matches and the early return fires before any guard placed after the loop. The guard must be inserted **inside the loop**, before the early return, not after it.
 
+**Two-part change:**
+
+**Part A — Inside the existing-session loop** (replace lines ~86-89):
 ```python
-# Escalation hard stop — check all of today's therapy sessions for this patient
+for existing_session in existing_result.scalars().all():
+    notes = parse_session_notes(existing_session.session_notes)
+    if notes.get("assignment_id") == body.assignment_id and not notes.get("completed"):
+        # Hard stop: escalated sessions cannot be resumed
+        if notes.get("escalated"):
+            raise HTTPException(
+                status_code=403,
+                detail="Session locked — this task requires therapist review before you can continue."
+            )
+        return {"session_id": str(existing_session.session_id)}
+```
+
+**Part B — Before new session creation** (insert before `session = Session(...)`):
+```python
+# Full-day pause: if any of today's therapy sessions is escalated, block new session creation
 from datetime import date
 today = date.today()
 today_sessions_result = await db.execute(
@@ -39,9 +56,7 @@ for sess in today_sessions_result.scalars().all():
         )
 ```
 
-**Insert point:** After the `existing_session` resume check (currently ~line 89), but **before** `session = Session(...)` is created (~line 100).
-
-**Note:** `func` is already imported from `sqlalchemy`. `date` should be imported at the top (`from datetime import date`). Verify both are present.
+**Note:** `func` is already imported from `sqlalchemy`. `date` should be imported at the top (`from datetime import date`). Verify both are present. Part B is the broader full-day pause; Part A is the narrower resume-path block — both are required.
 
 ### 6.3 — Add escalation 403 guard to `POST /session/{session_id}/attempt`
 **Location:** `submit_attempt` handler, after `session = await db.get(Session, session_id)` and the ownership check.
@@ -67,7 +82,8 @@ if notes.get("escalated"):
 
 ## Validation Criteria
 - [ ] `parse_session_notes` imported from `app.utils.session_notes` in `session.py` (no local copy).
-- [ ] `POST /session/start` queries today's therapy sessions and raises 403 if any has `escalated=True`.
+- [ ] `POST /session/start` raises 403 when the matched existing session has `escalated=True` (inside the loop, before early return).
+- [ ] `POST /session/start` also raises 403 for new session creation when any of today's sessions has `escalated=True` (full-day pause).
 - [ ] `POST /session/{session_id}/attempt` raises 403 immediately after session load if `session.session_notes` has `escalated=True`.
 - [ ] Non-escalated sessions are unaffected — no behavioral change for normal flow.
 - [ ] The 403 message is human-readable (used by the client to show an error state).

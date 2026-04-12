@@ -116,7 +116,16 @@ ADAPTIVE BLOCK PSEUDOCODE:
                # (the attempted_prompt_ids list already excludes the failed one)
        Else:
            # Drop one level
-           _upsert_patient_task_progress(cur, patient_id, task_id, "drop")
+           # current_level_id is the task_level_id on the prompt row (already loaded in analyze_attempt)
+           _upsert_patient_task_progress(
+               cur,
+               patient_id,
+               task_id,
+               current_level_id,   # level_id FK, not level name
+               "drop",             # adaptive_decision
+               final_score,        # current attempt's final_score
+               "fail",             # pass_fail
+           )
            adaptive_decision = "drop"
 
        notes["adaptive_interventions"] += 1
@@ -141,14 +150,26 @@ Where the `level_id` is the `task_level_id` on the `prompt` row. This is already
 ### 3.7 — Wire escalation notifications
 The two notification types are inserted via raw psycopg2 `INSERT INTO therapist_notification` (consistent with existing `_create_review_notification` pattern in `analysis.py`). Use the same pattern — do not call any async ORM inside the Celery worker.
 
-Notification schema fields needed:
-- `notification_id` (uuid)
-- `therapist_id`
-- `patient_id`
-- `notification_type` (`"task_attempt_failed"` or `"task_escalated"`)
-- `message`
-- `is_read` (False)
-- `created_at` (now UTC)
+Notification schema fields needed (match `therapist_notification` table exactly — column is `type`, not `notification_type`):
+
+```python
+cur.execute(
+    "INSERT INTO therapist_notification"
+    " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+    " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
+    (str(uuid.uuid4()), therapist_id, notification_type_value, patient_id, attempt_id, message_text),
+)
+```
+
+Fields:
+- `notification_id`: new `uuid.uuid4()`
+- `therapist_id`: therapist_id string
+- `type`: `"task_attempt_failed"` or `"task_escalated"` (column name is `type`, **not** `notification_type`)
+- `patient_id`: patient_id string
+- `attempt_id`: attempt_id string (available in `analyze_attempt` context)
+- `message`: message text
+- `is_read`: false (literal in SQL)
+- `created_at`: NOW() (literal in SQL)
 
 ### 3.8 — Dispatch `regenerate_plan_after_escalation.delay()`
 Add import at top of `analysis.py`:
@@ -186,5 +207,5 @@ regenerate_plan_after_escalation.delay(
 - [ ] Beginner rotation: if `current_level_name == "beginner"` and candidates exist → `adaptive_decision="alternate_prompt"`, no level change.
 - [ ] Beginner pool exhausted → treats as escalation (same flow as `>= 2` interventions).
 - [ ] Non-beginner fail → `_upsert_patient_task_progress` called with "drop", `adaptive_decision="drop"`.
-- [ ] `task_attempt_failed` notification created with intervention count in message.
+- [ ] `task_attempt_failed` notification created with `type='task_attempt_failed'` and intervention count in message.
 - [ ] WS payload published with correct `adaptive_decision` value in all branches.

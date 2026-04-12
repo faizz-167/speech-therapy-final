@@ -37,7 +37,8 @@
 | Subtask | Status | Notes |
 |---------|--------|-------|
 | 2.1 Add `initial_level_name` to `PlanTaskAssignment` model | NOT_STARTED | |
-| 2.2 Update `plan_generator.py` to populate `initial_level_name` | NOT_STARTED | |
+| 2.2 Apply schema change to DB (reset_db --seed OR ALTER TABLE) | NOT_STARTED | Document which path used |
+| 2.3 Update `plan_generator.py` to populate `initial_level_name` | NOT_STARTED | |
 
 ---
 

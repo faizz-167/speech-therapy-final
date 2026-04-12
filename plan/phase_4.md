@@ -47,10 +47,23 @@ If no rows updated: log a warning and continue. Do not fail the task.
 Full flow:
 ```
 a. Fetch patient's defect IDs:
-   SELECT unnest(pre_assigned_defect_ids) AS defect_id FROM patient WHERE patient_id = %s
+   pre_assigned_defect_ids is JSONB shaped {"defect_ids": ["id1", "id2", ...]}.
+   Do NOT use unnest() — that is for Postgres arrays, not JSONB.
+   Instead, fetch the JSONB value and parse it in Python (mirrors plan_generator.py line 32):
+
+   cur.execute(
+       "SELECT pre_assigned_defect_ids FROM patient WHERE patient_id = %s",
+       (patient_id,)
+   )
+   row = cur.fetchone()
+   defect_ids = (row[0] or {}).get("defect_ids", []) if row else []
+   if not defect_ids:
+       logger.warning("Patient %s has no defect_ids in pre_assigned_defect_ids", patient_id)
+       raise self.retry(...)
 
 b. Fetch task_ids mapped to those defects:
    SELECT DISTINCT task_id FROM task_defect_mapping WHERE defect_id = ANY(%s)
+   Pass defect_ids as a Python list — psycopg2 converts list → ANY(%s) correctly.
 
 c. Fetch task_ids eligible at new_level (from task_level):
    SELECT tl.task_id FROM task_level tl
@@ -98,14 +111,16 @@ VALUES
 ```
 
 ### 4.6 — Create `plan_regenerated_pending_approval` notification
+The `therapist_notification` table column is `type`, not `notification_type`. Use:
 ```sql
 INSERT INTO therapist_notification
-    (notification_id, therapist_id, patient_id, notification_type, message, is_read, created_at)
+    (notification_id, therapist_id, type, patient_id, plan_id, message, is_read, created_at)
 VALUES
-    (%s, %s, %s, 'plan_regenerated_pending_approval',
+    (%s, %s, 'plan_regenerated_pending_approval', %s, %s,
      'A new {new_level_name} plan has been auto-generated for {patient_name} following task escalation. Awaiting your approval.',
      FALSE, NOW())
 ```
+Pass `new_plan_id` for `plan_id` so therapist UIs can deep-link to the draft plan.
 
 ### 4.7 — Publish Redis event to therapist WS channel
 Check `analysis.py` for the exact Redis publish pattern. Replicate it for the therapist channel:

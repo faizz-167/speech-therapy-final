@@ -158,18 +158,27 @@ File: `server/app/routers/patient.py`
 Current return type: `list[TaskAssignmentOut]`
 New return type: `TodayTasksResponse`
 
+**Critical scoping detail:** A plain query on `patient_id + plan_id` without assignment scoping returns the latest session for the plan regardless of which assignment it belongs to — this produces incorrect results when multiple tasks share the same plan. Sessions are matched to assignments via `session_notes.assignment_id` (see `_find_active_assignment_session`, line 197). Use the same matching logic.
+
 **Algorithm:**
-1. Build the `assignments` list as before.
-2. For each assignment in today's assignments, check if there is an active (non-completed) session:
-   ```sql
-   SELECT session_notes FROM session
-   WHERE patient_id = :patient_id
-     AND plan_id = :plan_id
-     AND session_type = 'therapy'
-   ORDER BY session_date DESC
-   LIMIT 1
+1. Build the `assignments` list as before (existing logic, unchanged).
+2. For each assignment in today's list, find its assignment-scoped active session using the existing helper:
+   ```python
+   any_escalated = False
+   for assignment in today_assignments:
+       active_session = await _find_active_assignment_session(
+           patient.patient_id,
+           plan.plan_id,
+           str(assignment.assignment_id),
+           db,
+       )
+       if active_session:
+           notes = parse_session_notes(active_session.session_notes)
+           if notes.get("escalated"):
+               any_escalated = True
+               break   # one is enough; no need to check further
    ```
-   Parse session_notes. If `escalated == True` for any assignment → `any_escalated = True`.
+   `_find_active_assignment_session` is already defined in `patient.py` — reuse it directly.
 3. Return:
    ```python
    return TodayTasksResponse(assignments=assignments, any_escalated=any_escalated)
@@ -194,4 +203,5 @@ Update the response_model annotation on the route if one is set.
 - [ ] Mid-week: `last_attempted_at` in current ISO week → no recalculation, returns current level.
 - [ ] `_build_task_state` returns escalated response before any prompt loading when `notes["escalated"] == True`.
 - [ ] `GET /patient/tasks` returns `{ assignments: [...], any_escalated: bool }` shape.
-- [ ] `any_escalated=True` when at least one today's assignment has an escalated session.
+- [ ] `any_escalated=True` when at least one today's assignment has an escalated session, determined by assignment-scoped session lookup (not a raw plan-level query).
+- [ ] `any_escalated=False` when no session exists yet for an assignment (new day, no sessions started).
