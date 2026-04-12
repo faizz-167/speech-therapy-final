@@ -17,7 +17,9 @@
 3. Plan regeneration is dispatched as a new Celery task (`regenerate_plan_after_escalation`) using psycopg2 — consistent with the existing worker pattern
 4. Therapist plan approval UI already exists — no new UI needed beyond the new notification types
 5. Week-over-week level resolution runs lazily inside `_resolve_task_level_name` on first exercise fetch of the new week
-6. The full-day pause is enforced by a new `any_escalated` boolean in the `GET /patient/tasks` response, computed server-side
+6. The full-day pause is enforced by a new `any_escalated` boolean in the `GET /patient/tasks` response AND by hard 403 guards in the session endpoints
+7. Session note parsing/serialization lives in one shared utility — not duplicated across `patient.py`, `session.py`, and `analysis.py`
+8. Week-over-week averaging uses the terminal outcome per prompt (last attempt per prompt_id), not every raw attempt
 
 ---
 
@@ -45,6 +47,35 @@ Initialized to defaults when a session is created. All existing reads/writes are
 ---
 
 ## Component Changes
+
+### `server/app/utils/session_notes.py` (new shared utility)
+
+Single source of truth for all session_notes logic. Imported by `patient.py`, `session.py`, `analysis.py`, and `plan_regeneration.py`.
+
+```python
+def default_session_notes(assignment_id=None, task_id=None) -> dict:
+    return {
+        "assignment_id": assignment_id,
+        "task_id": task_id,
+        "completed_prompt_ids": [],
+        "passed_prompt_ids": [],
+        "completed": False,
+        "completion_status": None,
+        # adaptive engine fields
+        "adaptive_interventions": 0,
+        "attempted_prompt_ids": [],
+        "escalated": False,
+        "escalation_level": None,
+    }
+
+def parse_session_notes(raw: str | None) -> dict:
+    # safe JSON parse, merge with defaults, normalize list fields
+
+def serialize_session_notes(notes: dict) -> str:
+    # JSON dump with normalized fields
+```
+
+All four existing locations that currently define or copy `_default_session_notes` / `_parse_session_notes` / `_serialize_session_notes` are replaced with imports from this module.
 
 ### `server/app/services/plan_generator.py`
 
@@ -104,9 +135,9 @@ Single `SELECT name FROM task WHERE task_id = %s` — called only when `attempt_
 
 ### `server/app/routers/patient.py`
 
-**`_default_session_notes` / `_parse_session_notes` / `_serialize_session_notes`** — updated to include the four new fields with their defaults.
+**`_default_session_notes` / `_parse_session_notes` / `_serialize_session_notes`** — removed. Replaced with imports from `server/app/utils/session_notes.py`.
 
-**`_build_task_state`** — escalation gate added before existing prompt-loading logic:
+**`_build_task_state`** — signature gains `initial_level_name: str`. Escalation gate added before existing prompt-loading logic:
 
 ```
 If notes["escalated"] == true:
@@ -118,36 +149,65 @@ If notes["escalated"] == true:
     )
 ```
 
-**`GET /patient/tasks`** — response gains `any_escalated: bool`:
+Call site (`get_task_session_state`) passes `assignment.initial_level_name` into `_build_task_state`, which in turn passes it to `_resolve_task_level_name`.
 
-```
-For each of today's assignments, check if its active session has escalated=true.
-If any assignment is escalated → any_escalated=True in the response payload.
-Client uses this flag to render the full-day locked UI.
+**`GET /patient/tasks`** — response shape changes from `list[TaskAssignmentOut]` to `TodayTasksResponse`:
+
+```python
+class TodayTasksResponse(BaseModel):
+    assignments: list[TaskAssignmentOut]
+    any_escalated: bool
 ```
 
-**`_resolve_task_level_name`** — week-over-week logic replaces the existing single-read:
+Server-side: for each of today's assignments, find its active session (if any) and check `escalated` in session_notes. If any is `true`, `any_escalated=True`.
+
+Client updated to read `.assignments` instead of the raw array.
+
+**`_resolve_task_level_name`** — gains `initial_level_name: str` parameter. Week-over-week logic:
 
 ```
 1. If no patient_task_progress row exists:
        First time doing this task → use baseline level (existing behavior, unchanged)
 
-2. If progress exists and last_attempted_at is within the current week:
+2. If progress exists and last_attempted_at is within the current ISO week:
        Use current_level_id as-is (mid-week, no recalculation)
 
 3. If last_attempted_at is from a prior week:
-       a. Fetch all attempt_score_detail.final_score for attempts in the most
-          recent session linked to this task
-       b. Compute average_score = mean(final_scores)
-       c. Apply engine thresholds:
+       a. Find the most recent completed session for this task (via session_prompt_attempt
+          → task_level → task_id JOIN, ordered by session_date DESC)
+       b. For each unique prompt_id in that session, select the attempt with
+          MAX(attempt_number) → fetch its attempt_score_detail.final_score
+          (terminal outcome per prompt — retries are not double-counted)
+       c. Compute average_score = mean of those terminal final_scores
+       d. Apply engine thresholds:
               average_score >= 75  → advance one level
               60 <= score < 75     → stay at current level
               score < 60           → drop one level
-       d. Floor clamp: never drop below the initial_level_name stored on
-          plan_task_assignment for this task
-       e. Update patient_task_progress.current_level_id with resolved level
-       f. Return resolved level name
+       e. Floor clamp: never drop below initial_level_name (passed in from assignment)
+       f. Update patient_task_progress.current_level_id with resolved level
+       g. Return resolved level name
 ```
+
+### `server/app/routers/session.py`
+
+**`POST /session/start`** — escalation hard stop added before session creation:
+
+```
+Query today's active sessions for this patient (session_type='therapy', session_date=today).
+For each, parse session_notes.
+If any session has escalated=true → raise HTTPException(403, "Session locked pending therapist review")
+```
+
+**`POST /session/{session_id}/attempt`** — escalation hard stop added after session load:
+
+```
+After: session = await db.get(Session, session_id)
+Add:   notes = parse_session_notes(session.session_notes)
+       if notes["escalated"]:
+           raise HTTPException(403, "This session is locked pending therapist review")
+```
+
+These two guards ensure the lock is enforced at the API layer regardless of what the client sends.
 
 ### `server/app/tasks/plan_regeneration.py` (new file)
 
@@ -227,13 +287,13 @@ def regenerate_plan_after_escalation(self, patient_id, therapist_id, escalation_
 
 **`client/app/patient/tasks/page.tsx`**
 
-- Read `any_escalated` from `GET /patient/tasks` response
-- If `true` → render full-day locked state: "One of today's tasks requires therapist review before you can continue."
+- `GET /patient/tasks` now returns `{ assignments: TaskAssignmentOut[], any_escalated: boolean }` — update all reads from raw array to `.assignments`
+- If `any_escalated=true` → render full-day locked state: "One of today's tasks requires therapist review before you can continue."
 
-**`client/types.ts`**
+**`client/lib/api.ts` or `client/types.ts`**
 
+- Add `TodayTasksResponse` type: `{ assignments: TaskAssignmentOut[], any_escalated: boolean }`
 - Add `escalated?: boolean` and `escalation_message?: string` to `TaskExerciseState`
-- Add `any_escalated?: boolean` to the tasks list response type
 
 ---
 
@@ -258,7 +318,11 @@ def regenerate_plan_after_escalation(self, patient_id, therapist_id, escalation_
 | Adaptive state in `session_notes` | New `task_session_state` table | Established pattern; avoids extra table and join on every exercise fetch |
 | Plan regeneration as separate Celery task | Inline in `analyze_attempt`; async service call | Clean failure domain — plan regeneration failure does not retry the scoring job |
 | `initial_level_name` on `plan_task_assignment` | Derive from `therapy_plan.goals`; store in `patient_task_progress` | Assignment is the correct scope — each assignment has exactly one initial level |
+| Floor passed as parameter into `_resolve_task_level_name` | Store floor on `PatientTaskProgress` | Avoids stale-floor problem if a new plan assigns the same task at a different level |
 | Week-over-week resolution inside `_resolve_task_level_name` | Separate background job; compute at plan generation time | Lazy evaluation on first exercise fetch — no cron job needed, always fresh |
-| Full-day pause via `any_escalated` in `GET /patient/tasks` | Separate `/patient/day-status` endpoint | Reuses existing tasks endpoint; client makes no extra calls |
+| Week-over-week averages terminal outcome per prompt | Average every raw attempt score | Retries would over-weight failures; terminal outcome reflects actual performance |
+| Full-day pause: `any_escalated` in `GET /patient/tasks` + 403 guards in session endpoints | Client-only flag | Client flag alone is not a hard stop — direct API calls could bypass it |
+| `/patient/tasks` wrapped in `TodayTasksResponse` envelope | Add field to existing `TaskAssignmentOut` | `any_escalated` is session-aggregate data, not per-assignment data — wrong shape if embedded in each row |
+| Session notes in one shared utility | Keep copies in each router/task | Four locations were already diverging; new fields would create four more divergence points |
 | Beginner pool exhaustion triggers early escalation | Keep retrying same prompt | No therapeutic value in repeating an already-failed prompt with no available alternatives |
 | Escalation retry guard via `notes["escalated"]` check | Celery idempotency key in Redis | Simpler — single DB read, no distributed lock needed |
