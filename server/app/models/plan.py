@@ -38,6 +38,7 @@ class PlanTaskAssignment(Base):
     status: Mapped[str] = mapped_column(String, default="pending")
     paused: Mapped[bool] = mapped_column(Boolean, default=False)
     clinical_rationale: Mapped[str | None] = mapped_column(Text)
+    initial_level_name: Mapped[str | None] = mapped_column(String, nullable=True)
 
     plan: Mapped["TherapyPlan"] = relationship("TherapyPlan", back_populates="assignments")
 

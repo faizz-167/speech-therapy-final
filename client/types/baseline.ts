@@ -37,6 +37,7 @@ export interface AttemptResult {
   speech_rate_wpm: number | null;
   speech_rate_score: number | null;
   confidence_score: number | null;
+  emotion_score?: number | null;
   engagement_score: number | null;
   dominant_emotion: string | null;
   pass_fail: string | null;
@@ -62,6 +63,7 @@ export interface BaselineItemDetail {
   speech_rate_wpm: number | null;
   speech_rate_score: number | null;
   confidence_score: number | null;
+  emotion_score?: number | null;
   engagement_score: number | null;
   dominant_emotion: string | null;
   final_score: number;

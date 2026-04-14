@@ -1,10 +1,9 @@
-import json
 import uuid
 from datetime import date, datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import String, cast, select
+from sqlalchemy import String, cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_patient
@@ -13,7 +12,7 @@ from app.models.baseline import PatientBaselineResult
 from app.models.content import Defect, Prompt, Task, TaskLevel
 from app.models.operations import PatientNotification
 from app.models.plan import PlanTaskAssignment, TherapyPlan
-from app.models.scoring import PatientTaskProgress, Session
+from app.models.scoring import AttemptScoreDetail, PatientTaskProgress, Session, SessionPromptAttempt
 from app.models.users import Patient, Therapist
 from app.schemas.patient import (
     PatientNotificationOut,
@@ -21,7 +20,17 @@ from app.schemas.patient import (
     PromptOut,
     TaskAssignmentOut,
     TaskExerciseStateOut,
+    TodayTasksResponse,
 )
+from app.utils.session_notes import default_session_notes, parse_session_notes, serialize_session_notes
+
+LEVEL_ADVANCE = {"beginner": "intermediate", "intermediate": "advanced", "advanced": "advanced"}
+LEVEL_DROP = {"advanced": "intermediate", "intermediate": "beginner", "beginner": "beginner"}
+LEVEL_ORDER = {"beginner": 0, "intermediate": 1, "advanced": 2}
+
+
+def _same_iso_week(dt: datetime, today: date) -> bool:
+    return dt.isocalendar()[:2] == today.isocalendar()[:2]
 
 router = APIRouter()
 
@@ -37,58 +46,6 @@ def _normalize_task_level_name(level: str | None) -> str:
         "intermediate": "intermediate",
         "expert": "expert",
     }.get(normalized, "beginner")
-
-
-def _default_session_notes(
-    assignment_id: str | None = None,
-    task_id: str | None = None,
-) -> dict:
-    return {
-        "assignment_id": assignment_id,
-        "task_id": task_id,
-        "completed_prompt_ids": [],
-        "passed_prompt_ids": [],
-        "completed": False,
-        "completion_status": None,
-    }
-
-
-def _parse_session_notes(notes: str | None) -> dict:
-    data = _default_session_notes()
-    if not notes:
-        return data
-    try:
-        parsed = json.loads(notes)
-    except (TypeError, ValueError):
-        return data
-    if isinstance(parsed, dict):
-        data.update(parsed)
-    completed_prompt_ids = data.get("completed_prompt_ids") or []
-    passed_prompt_ids = data.get("passed_prompt_ids") or []
-    data["completed_prompt_ids"] = [
-        str(prompt_id) for prompt_id in completed_prompt_ids if prompt_id
-    ]
-    data["passed_prompt_ids"] = [
-        str(prompt_id) for prompt_id in passed_prompt_ids if prompt_id
-    ]
-    data["completed"] = bool(data.get("completed"))
-    return data
-
-
-def _serialize_session_notes(notes: dict) -> str:
-    normalized = _default_session_notes(
-        assignment_id=notes.get("assignment_id"),
-        task_id=notes.get("task_id"),
-    )
-    normalized["completed_prompt_ids"] = list(
-        dict.fromkeys(str(prompt_id) for prompt_id in (notes.get("completed_prompt_ids") or []) if prompt_id)
-    )
-    normalized["passed_prompt_ids"] = list(
-        dict.fromkeys(str(prompt_id) for prompt_id in (notes.get("passed_prompt_ids") or []) if prompt_id)
-    )
-    normalized["completed"] = bool(notes.get("completed"))
-    normalized["completion_status"] = notes.get("completion_status")
-    return json.dumps(normalized)
 
 
 def _prompt_to_out(prompt: Prompt) -> PromptOut:
@@ -123,6 +80,7 @@ async def _resolve_task_level_name(
     patient: Patient,
     task_id: str,
     db: AsyncSession,
+    initial_level_name: str | None = None,
 ) -> str:
     progress_result = await db.execute(
         select(PatientTaskProgress).where(
@@ -131,20 +89,100 @@ async def _resolve_task_level_name(
         )
     )
     progress = progress_result.scalar_one_or_none()
-    if progress and progress.current_level_id:
-        level = await db.get(TaskLevel, progress.current_level_id)
-        if level:
-            return level.level_name
 
-    baseline_result = await db.execute(
-        select(PatientBaselineResult)
-        .where(PatientBaselineResult.patient_id == patient.patient_id)
-        .order_by(PatientBaselineResult.assessed_on.desc())
+    if not (progress and progress.current_level_id):
+        # No progress row — fall back to baseline
+        baseline_result = await db.execute(
+            select(PatientBaselineResult)
+            .where(PatientBaselineResult.patient_id == patient.patient_id)
+            .order_by(PatientBaselineResult.assessed_on.desc())
+        )
+        baseline = baseline_result.scalars().first()
+        if baseline and baseline.severity_rating:
+            return _normalize_task_level_name(baseline.severity_rating)
+        return "beginner"
+
+    level = await db.get(TaskLevel, progress.current_level_id)
+    current_level_name = level.level_name if level else "beginner"
+
+    # Mid-week: last attempt was in the current ISO week — no recalculation
+    today = date.today()
+    if progress.last_attempted_at and _same_iso_week(progress.last_attempted_at, today):
+        return current_level_name
+
+    # Prior week (or never attempted): run week-over-week recalculation
+    # a. Find most recent therapy session for this (patient, task)
+    session_row = await db.execute(
+        select(Session.session_id)
+        .join(SessionPromptAttempt, SessionPromptAttempt.session_id == Session.session_id)
+        .join(Prompt, Prompt.prompt_id == SessionPromptAttempt.prompt_id)
+        .join(TaskLevel, TaskLevel.level_id == Prompt.level_id)
+        .where(
+            Session.patient_id == patient.patient_id,
+            TaskLevel.task_id == task_id,
+            Session.session_type == "therapy",
+        )
+        .order_by(Session.session_date.desc())
+        .limit(1)
     )
-    baseline = baseline_result.scalars().first()
-    if baseline and baseline.severity_rating:
-        return _normalize_task_level_name(baseline.severity_rating)
-    return "beginner"
+    prior_session_id = session_row.scalar_one_or_none()
+
+    if prior_session_id is None:
+        return current_level_name
+
+    # b. Get terminal final_score per prompt (highest attempt_number per prompt)
+    terminal_scores_result = await db.execute(
+        text(
+            "SELECT spa.prompt_id, asd.final_score"
+            " FROM session_prompt_attempt spa"
+            " JOIN attempt_score_detail asd ON asd.attempt_id = spa.attempt_id"
+            " WHERE spa.session_id = :session_id"
+            "   AND spa.attempt_number = ("
+            "       SELECT MAX(spa2.attempt_number)"
+            "       FROM session_prompt_attempt spa2"
+            "       WHERE spa2.session_id = :session_id"
+            "         AND spa2.prompt_id = spa.prompt_id"
+            "   )"
+        ),
+        {"session_id": str(prior_session_id)},
+    )
+    rows = terminal_scores_result.fetchall()
+    final_scores = [float(r[1]) for r in rows if r[1] is not None]
+
+    if not final_scores:
+        return current_level_name
+
+    # c. Average score
+    average_score = sum(final_scores) / len(final_scores)
+
+    # d. Threshold decision
+    if average_score >= 75:
+        resolved_level = LEVEL_ADVANCE.get(current_level_name, current_level_name)
+    elif average_score >= 60:
+        resolved_level = current_level_name
+    else:
+        resolved_level = LEVEL_DROP.get(current_level_name, current_level_name)
+
+    # e. Floor clamp against initial_level_name
+    if initial_level_name:
+        initial_order = LEVEL_ORDER.get(initial_level_name.lower(), 0)
+        resolved_order = LEVEL_ORDER.get(resolved_level.lower(), 0)
+        if resolved_order < initial_order:
+            resolved_level = initial_level_name.lower()
+
+    # f. Update patient_task_progress.current_level_id
+    new_level_result = await db.execute(
+        select(TaskLevel).where(
+            TaskLevel.task_id == task_id,
+            cast(TaskLevel.level_name, String) == resolved_level,
+        )
+    )
+    new_level = new_level_result.scalar_one_or_none()
+    if new_level and progress:
+        progress.current_level_id = new_level.level_id
+        await db.commit()
+
+    return resolved_level
 
 
 async def _load_level_prompts(
@@ -210,7 +248,7 @@ async def _find_active_assignment_session(
         .order_by(Session.session_date.desc())
     )
     for session in result.scalars().all():
-        notes = _parse_session_notes(session.session_notes)
+        notes = parse_session_notes(session.session_notes)
         if notes.get("assignment_id") == assignment_id and not notes.get("completed"):
             return session
     return None
@@ -228,8 +266,8 @@ async def _create_assignment_session(
         therapist_id=patient.assigned_therapist_id,
         plan_id=plan.plan_id,
         session_type="therapy",
-        session_notes=_serialize_session_notes(
-            _default_session_notes(
+        session_notes=serialize_session_notes(
+            default_session_notes(
                 assignment_id=str(assignment.assignment_id),
                 task_id=assignment.task_id,
             )
@@ -266,8 +304,24 @@ async def _build_task_state(
     db: AsyncSession,
 ) -> TaskExerciseStateOut:
     session = await _get_or_create_assignment_session(patient, plan, assignment, db)
-    notes = _parse_session_notes(session.session_notes)
-    target_level_name = await _resolve_task_level_name(patient, task.task_id, db)
+    notes = parse_session_notes(session.session_notes)
+
+    if notes.get("escalated"):
+        return TaskExerciseStateOut(
+            session_id=str(session.session_id),
+            current_level="",
+            total_prompts=0,
+            completed_prompts=0,
+            task_complete=False,
+            current_prompt=None,
+            escalated=True,
+            escalation_message="Your therapist is reviewing this task. Please check back later.",
+        )
+
+    target_level_name = await _resolve_task_level_name(
+        patient, task.task_id, db,
+        initial_level_name=assignment.initial_level_name,
+    )
     level, prompts = await _load_level_prompts(task.task_id, target_level_name, db)
     current_level_name = level.level_name if level else "beginner"
 
@@ -436,14 +490,14 @@ async def patient_home(
     }
 
 
-@router.get("/tasks", response_model=list[TaskAssignmentOut])
+@router.get("/tasks", response_model=TodayTasksResponse)
 async def get_today_tasks(
     patient: Annotated[Patient, Depends(require_patient)],
     db: AsyncSession = Depends(get_db),
 ):
     plan = await _get_current_plan(patient.patient_id, db)
     if not plan:
-        return []
+        return TodayTasksResponse(assignments=[], any_escalated=False)
 
     today_idx = date.today().weekday()
     assignment_result = await db.execute(
@@ -452,9 +506,9 @@ async def get_today_tasks(
             PlanTaskAssignment.day_index == today_idx,
         )
     )
-    assignments = assignment_result.scalars().all()
+    today_assignments = assignment_result.scalars().all()
     out = []
-    for assignment in assignments:
+    for assignment in today_assignments:
         task = await db.get(Task, assignment.task_id)
         progress_result = await db.execute(
             select(PatientTaskProgress).where(
@@ -479,7 +533,22 @@ async def get_today_tasks(
                 current_level=current_level,
             )
         )
-    return out
+
+    any_escalated = False
+    for assignment in today_assignments:
+        active_session = await _find_active_assignment_session(
+            patient.patient_id,
+            plan.plan_id,
+            str(assignment.assignment_id),
+            db,
+        )
+        if active_session:
+            notes = parse_session_notes(active_session.session_notes)
+            if notes.get("escalated"):
+                any_escalated = True
+                break
+
+    return TodayTasksResponse(assignments=out, any_escalated=any_escalated)
 
 
 @router.get("/tasks/{assignment_id}/prompts", response_model=list[PromptOut])
@@ -489,7 +558,10 @@ async def get_prompts(
     db: AsyncSession = Depends(get_db),
 ):
     assignment, _plan, task = await _get_assignment(assignment_id, patient, db)
-    target_level_name = await _resolve_task_level_name(patient, task.task_id, db)
+    target_level_name = await _resolve_task_level_name(
+        patient, task.task_id, db,
+        initial_level_name=assignment.initial_level_name,
+    )
     _level, prompts = await _load_level_prompts(task.task_id, target_level_name, db)
     return [_prompt_to_out(prompt) for prompt in prompts]
 
@@ -522,10 +594,10 @@ async def complete_task(
     if not state.task_complete:
         assignment.status = "pending"
         if session:
-            notes = _parse_session_notes(session.session_notes)
+            notes = parse_session_notes(session.session_notes)
             notes["completed"] = True
             notes["completion_status"] = "pending"
-            session.session_notes = _serialize_session_notes(notes)
+            session.session_notes = serialize_session_notes(notes)
         await db.commit()
         return {
             "message": "Task remains pending until all current exercises are passed.",
@@ -534,10 +606,10 @@ async def complete_task(
 
     assignment.status = "completed"
     if session:
-        notes = _parse_session_notes(session.session_notes)
+        notes = parse_session_notes(session.session_notes)
         notes["completed"] = True
         notes["completion_status"] = "completed"
-        session.session_notes = _serialize_session_notes(notes)
+        session.session_notes = serialize_session_notes(notes)
     await db.commit()
     return {"message": "Task marked complete", "status": "completed"}
 

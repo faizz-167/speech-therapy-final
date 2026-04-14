@@ -95,7 +95,7 @@ function toBaselineAttemptScore(attemptResult: AttemptResult): AttemptScore {
     speech_rate_wpm: attemptResult.speech_rate_wpm,
     speech_rate_score: attemptResult.speech_rate_score,
     behavioral_score: null,
-    emotion_score: null,
+    emotion_score: attemptResult.emotion_score ?? null,
     dominant_emotion: attemptResult.dominant_emotion,
     engagement_score: attemptResult.engagement_score,
     speech_score: null,

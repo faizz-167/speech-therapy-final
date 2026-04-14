@@ -1,8 +1,7 @@
 import os
 import uuid
-import json
 import aiofiles
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
@@ -17,37 +16,9 @@ from app.models.plan import TherapyPlan, PlanTaskAssignment
 from app.schemas.session import StartSessionRequest, AttemptStatusResponse
 from app.tasks.analysis import analyze_attempt
 from app.config import settings
+from app.utils.session_notes import default_session_notes, parse_session_notes, serialize_session_notes
 
 router = APIRouter()
-
-
-def _default_session_notes(assignment_id: str | None = None, task_id: str | None = None) -> dict:
-    return {
-        "assignment_id": assignment_id,
-        "task_id": task_id,
-        "completed_prompt_ids": [],
-        "passed_prompt_ids": [],
-        "completed": False,
-        "completion_status": None,
-    }
-
-
-def _parse_session_notes(notes: str | None) -> dict:
-    if not notes:
-        return _default_session_notes()
-    try:
-        parsed = json.loads(notes)
-    except (TypeError, ValueError):
-        return _default_session_notes()
-    if not isinstance(parsed, dict):
-        return _default_session_notes()
-    return {
-        **_default_session_notes(
-            assignment_id=parsed.get("assignment_id"),
-            task_id=parsed.get("task_id"),
-        ),
-        **parsed,
-    }
 
 
 def _parse_browser_datetime(value: str, field_name: str) -> datetime:
@@ -84,8 +55,13 @@ async def start_session(
             ).order_by(Session.session_date.desc())
         )
         for existing_session in existing_result.scalars().all():
-            notes = _parse_session_notes(existing_session.session_notes)
+            notes = parse_session_notes(existing_session.session_notes)
             if notes.get("assignment_id") == body.assignment_id and not notes.get("completed"):
+                if notes.get("escalated"):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Session locked — this task requires therapist review before you can continue.",
+                    )
                 return {"session_id": str(existing_session.session_id)}
     elif body.plan_id:
         plan = await db.get(TherapyPlan, uuid.UUID(body.plan_id))
@@ -97,14 +73,30 @@ async def start_session(
     else:
         raise HTTPException(400, "assignment_id or plan_id is required")
 
+    today = date.today()
+    today_sessions_result = await db.execute(
+        select(Session).where(
+            Session.patient_id == patient.patient_id,
+            Session.session_type == "therapy",
+            func.date(Session.session_date) == today,
+        )
+    )
+    for sess in today_sessions_result.scalars().all():
+        sess_notes = parse_session_notes(sess.session_notes)
+        if sess_notes.get("escalated"):
+            raise HTTPException(
+                status_code=403,
+                detail="Session locked — one of today's tasks requires therapist review before you can continue.",
+            )
+
     session = Session(
         session_id=uuid.uuid4(),
         patient_id=patient.patient_id,
         therapist_id=patient.assigned_therapist_id,
         plan_id=resolved_plan_id,
         session_type="therapy",
-        session_notes=json.dumps(
-            _default_session_notes(
+        session_notes=serialize_session_notes(
+            default_session_notes(
                 assignment_id=body.assignment_id,
                 task_id=assignment.task_id if body.assignment_id and assignment else None,
             )
@@ -130,6 +122,13 @@ async def submit_attempt(
     session = await db.get(Session, session_id)
     if not session or session.patient_id != patient.patient_id:
         raise HTTPException(404, "Session not found")
+
+    attempt_notes = parse_session_notes(session.session_notes)
+    if attempt_notes.get("escalated"):
+        raise HTTPException(
+            status_code=403,
+            detail="This session is locked pending therapist review.",
+        )
 
     prompt = await db.get(Prompt, prompt_id)
     if not prompt:

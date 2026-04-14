@@ -60,6 +60,7 @@ class BaselineItemDetailOut(BaseModel):
     speech_rate_wpm: Optional[float] = None
     speech_rate_score: Optional[float] = None
     confidence_score: Optional[float] = None
+    emotion_score: Optional[float] = None
     engagement_score: Optional[float] = None
     dominant_emotion: Optional[str] = None
     final_score: float

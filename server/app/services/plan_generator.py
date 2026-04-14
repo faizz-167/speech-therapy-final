@@ -94,6 +94,7 @@ async def generate_weekly_plan(
             day_index=day_index,
             priority_order=priority,
             status="pending",
+            initial_level_name=baseline_level,
         )
         db.add(assignment)
 

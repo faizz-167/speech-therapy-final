@@ -203,6 +203,7 @@ async def poll_baseline_attempt(
         "speech_rate_wpm": float(attempt.ml_speech_rate_wpm) if attempt.ml_speech_rate_wpm is not None else None,
         "speech_rate_score": float(attempt.ml_speech_rate_score) if attempt.ml_speech_rate_score is not None else None,
         "confidence_score": float(attempt.ml_confidence) if attempt.ml_confidence is not None else None,
+        "emotion_score": float(attempt.emotion_score) if attempt.emotion_score is not None else None,
         "engagement_score": float(attempt.engagement_score) if attempt.engagement_score is not None else None,
         "dominant_emotion": attempt.dominant_emotion,
         "pass_fail": "pass" if float(attempt.computed_score or 0) >= 70 else "fail",
@@ -426,6 +427,11 @@ async def therapist_get_baseline_items(
             confidence_score=(
                 float(attempts_by_item[item.item_id].ml_confidence)
                 if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_confidence is not None
+                else None
+            ),
+            emotion_score=(
+                float(attempts_by_item[item.item_id].emotion_score)
+                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].emotion_score is not None
                 else None
             ),
             engagement_score=(

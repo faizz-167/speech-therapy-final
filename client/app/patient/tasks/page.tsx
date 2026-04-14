@@ -1,7 +1,7 @@
 "use client";
 import { useQueries } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Assignment, HomeSummary } from "@/types";
+import { HomeSummary, TodayTasksResponse } from "@/types";
 import { NeoCard } from "@/components/ui/NeoCard";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { LoadingState } from "@/components/ui/LoadingState";
@@ -12,7 +12,7 @@ import Link from "next/link";
 export default function TasksPage() {
   const results = useQueries({
     queries: [
-      { queryKey: ["patient", "tasks"], queryFn: () => api.get<Assignment[]>("/patient/tasks") },
+      { queryKey: ["patient", "tasks"], queryFn: () => api.get<TodayTasksResponse>("/patient/tasks") },
       { queryKey: ["patient", "home"], queryFn: () => api.get<HomeSummary>("/patient/home").catch(() => null) },
     ],
   });
@@ -24,7 +24,8 @@ export default function TasksPage() {
   if (isLoading) return <LoadingState label="Loading your tasks..." />;
   if (error) return <ErrorState message={error instanceof Error ? error.message : "Failed to load"} />;
 
-  const tasks = tasksQ.data ?? [];
+  const tasks = tasksQ.data?.assignments ?? [];
+  const anyEscalated = tasksQ.data?.any_escalated ?? false;
   const homeSummary = homeQ.data ?? null;
   const allCompleted = tasks.length > 0 && tasks.every((t) => t.status === "completed");
 
@@ -40,6 +41,13 @@ export default function TasksPage() {
         <h1 className="text-3xl font-black uppercase">Today&apos;s Tasks</h1>
         <p className="font-bold text-neo-black/70">{day}</p>
       </div>
+
+      {anyEscalated && (
+        <div className="border-2 border-black bg-yellow-300 p-4 mb-4 font-bold shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
+          One of today&apos;s tasks requires therapist review before you can continue.
+          Check back once your therapist has approved a new plan.
+        </div>
+      )}
 
       {allCompleted ? (
         <EmptyState

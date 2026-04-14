@@ -64,6 +64,16 @@ export default function ExercisePage() {
           if (!currentAttemptIdRef.current || data.attempt_id !== currentAttemptIdRef.current) return;
           clearAttemptTracking();
           setWsReconnecting(false);
+          if (data.adaptive_decision === "escalated") {
+            toast.error("This task has been escalated for therapist review.");
+            router.push("/patient/tasks");
+            return;
+          }
+          if (data.adaptive_decision === "alternate_prompt") {
+            toast("Difficulty adjusted — trying a different exercise.");
+            void finishOrAdvance();
+            return;
+          }
           setNoSpeech(data.fail_reason === NO_SPEECH_REASON);
           setScore(data);
           setPhase("scored");
@@ -89,7 +99,13 @@ export default function ExercisePage() {
   }, [userId]);
 
   useEffect(() => {
-    if (!exerciseState?.current_prompt) {
+    if (!exerciseState) return;
+    if (exerciseState.escalated) {
+      toast.error("This task has been escalated for therapist review.");
+      router.push("/patient/tasks");
+      return;
+    }
+    if (!exerciseState.current_prompt) {
       return;
     }
     setPhase("instruction");
@@ -97,7 +113,7 @@ export default function ExercisePage() {
     setAttemptNumber(null);
     setNoSpeech(false);
     setUploadError("");
-  }, [exerciseState?.current_prompt?.prompt_id]);
+  }, [exerciseState?.escalated, exerciseState?.current_prompt?.prompt_id, router]);
 
   useEffect(() => {
     if (!exerciseState || exerciseState.current_prompt || !exerciseState.task_complete || autoCompletingRef.current) {
@@ -194,6 +210,16 @@ export default function ExercisePage() {
           const poll = await api.get<PollResult>(`/session/attempt/${response.attempt_id}`);
           if (poll.result && poll.result !== "pending" && poll.score) {
             clearAttemptTracking();
+            if (poll.score.adaptive_decision === "escalated") {
+              toast.error("This task has been escalated for therapist review.");
+              router.push("/patient/tasks");
+              return;
+            }
+            if (poll.score.adaptive_decision === "alternate_prompt") {
+              toast("Difficulty adjusted — trying a different exercise.");
+              void finishOrAdvance();
+              return;
+            }
             setNoSpeech(poll.score.fail_reason === NO_SPEECH_REASON);
             setScore(poll.score);
             setPhase("scored");

@@ -3,14 +3,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import String, cast, select
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.auth import require_therapist
 from app.models.users import Therapist, Patient
 from app.models.plan import TherapyPlan, PlanTaskAssignment, PlanRevisionHistory
-from app.models.content import Task, TaskDefectMapping
+from app.models.content import Task, TaskDefectMapping, TaskLevel
 from app.models.operations import PatientNotification
 from app.schemas.plans import (
     GeneratePlanRequest, PlanOut, AssignmentOut, AddTaskRequest,
@@ -24,6 +24,11 @@ router = APIRouter()
 def _build_revision_summary(entry: PlanRevisionHistory) -> str | None:
     if entry.note:
         return entry.note
+    if entry.action == "update_level" and entry.old_value and entry.new_value:
+        return (
+            f"Changed level from {entry.old_value.get('initial_level_name')} "
+            f"to {entry.new_value.get('initial_level_name')}"
+        )
     if entry.action == "add_task" and entry.new_value:
         return f"Added task {entry.new_value.get('task_id')} to day {entry.new_value.get('day_index')}"
     if entry.action == "reorder" and entry.new_value:
@@ -54,6 +59,7 @@ async def _plan_to_out(plan: TherapyPlan, db: AsyncSession) -> PlanOut:
             day_index=a.day_index,
             status=a.status,
             priority_order=a.priority_order,
+            initial_level_name=a.initial_level_name,
         ))
     return PlanOut(
         plan_id=str(plan.plan_id),
@@ -69,6 +75,34 @@ async def _plan_to_out(plan: TherapyPlan, db: AsyncSession) -> PlanOut:
 async def _get_plan_with_assignments(stmt, db: AsyncSession) -> TherapyPlan | None:
     result = await db.execute(stmt.options(selectinload(TherapyPlan.assignments)))
     return result.scalar_one_or_none()
+
+
+async def _resolve_default_task_level_name(task_id: str, db: AsyncSession) -> str | None:
+    result = await db.execute(
+        select(TaskLevel.level_name)
+        .where(TaskLevel.task_id == task_id)
+        .order_by(TaskLevel.difficulty_score.asc())
+        .limit(1)
+    )
+    level_name = result.scalar_one_or_none()
+    return level_name.lower() if isinstance(level_name, str) else level_name
+
+
+async def _validate_task_level_name(task_id: str, level_name: str, db: AsyncSession) -> str:
+    normalized = (level_name or "").strip().lower()
+    if not normalized:
+        raise HTTPException(400, "Level is required")
+
+    result = await db.execute(
+        select(TaskLevel.level_name).where(
+            TaskLevel.task_id == task_id,
+            cast(TaskLevel.level_name, String) == normalized,
+        )
+    )
+    resolved = result.scalar_one_or_none()
+    if not resolved:
+        raise HTTPException(400, f"Level '{normalized}' is not available for this task")
+    return str(resolved).lower()
 
 
 @router.post("/generate", response_model=PlanOut)
@@ -155,6 +189,7 @@ async def add_task(
     task = await db.get(Task, body.task_id)
     if not task:
         raise HTTPException(404, "Task not found")
+    default_level_name = await _resolve_default_task_level_name(body.task_id, db)
     assignment = PlanTaskAssignment(
         assignment_id=uuid.uuid4(),
         plan_id=uuid.UUID(plan_id),
@@ -163,6 +198,7 @@ async def add_task(
         day_index=body.day_index,
         priority_order=body.priority_order,
         status="pending",
+        initial_level_name=default_level_name,
     )
     db.add(assignment)
     await db.commit()
@@ -183,6 +219,7 @@ async def add_task(
         day_index=assignment.day_index,
         status=assignment.status,
         priority_order=assignment.priority_order,
+        initial_level_name=assignment.initial_level_name,
     )
 
 
@@ -216,13 +253,23 @@ async def update_assignment(
         assignment.day_index = body.day_index
     if body.status is not None:
         assignment.status = body.status
+    revision_action = "reorder"
+    revision_old_value = None
+    revision_new_value = {"day_index": assignment.day_index, "priority_order": assignment.priority_order}
+    if body.initial_level_name is not None:
+        validated_level_name = await _validate_task_level_name(assignment.task_id, body.initial_level_name, db)
+        revision_action = "update_level"
+        revision_old_value = {"initial_level_name": assignment.initial_level_name}
+        assignment.initial_level_name = validated_level_name
+        revision_new_value = {"initial_level_name": assignment.initial_level_name}
     await db.commit()
     revision = PlanRevisionHistory(
         plan_id=plan.plan_id,
         therapist_id=therapist.therapist_id,
-        action="reorder",
+        action=revision_action,
         assignment_id=assignment.assignment_id,
-        new_value={"day_index": assignment.day_index, "priority_order": assignment.priority_order},
+        old_value=revision_old_value,
+        new_value=revision_new_value,
     )
     db.add(revision)
     await db.commit()
@@ -235,6 +282,7 @@ async def update_assignment(
         day_index=assignment.day_index,
         status=assignment.status,
         priority_order=assignment.priority_order,
+        initial_level_name=assignment.initial_level_name,
     )
 
 

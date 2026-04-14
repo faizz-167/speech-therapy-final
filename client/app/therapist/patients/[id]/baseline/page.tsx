@@ -112,9 +112,16 @@ export default function TherapistBaselinePage() {
                         <p className="text-2xl font-black">{item.confidence_score ?? "—"}</p>
                       </div>
                       <div className="border-4 border-neo-black bg-white px-4 py-3">
+                        <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Emotion Score</p>
+                        <p className="text-2xl font-black">{item.emotion_score ?? "—"}</p>
+                      </div>
+                      <div className="border-4 border-neo-black bg-white px-4 py-3">
                         <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Engagement</p>
                         <p className="text-2xl font-black">{item.engagement_score ?? "—"}</p>
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                       <div className="border-4 border-neo-black bg-white px-4 py-3">
                         <p className="text-xs font-black uppercase tracking-widest text-neo-black/70">Emotion</p>
                         <p className="text-2xl font-black capitalize">{item.dominant_emotion ?? "—"}</p>

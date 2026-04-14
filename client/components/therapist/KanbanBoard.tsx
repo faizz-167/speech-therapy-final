@@ -28,6 +28,7 @@ interface Props {
   onMove: (assignmentId: string, newDayIndex: number) => Promise<void>;
   onAdd: (taskId: string, dayIndex: number) => Promise<void>;
   onDelete: (assignmentId: string) => Promise<void>;
+  onUpdateLevel: (assignmentId: string, levelName: string) => Promise<void>;
 }
 
 interface DayColumnProps {
@@ -36,6 +37,7 @@ interface DayColumnProps {
   availableTasks: Task[];
   onAdd: (taskId: string, dayIndex: number) => Promise<void>;
   onDelete: (id: string) => void;
+  onUpdateLevel: (assignmentId: string, levelName: string) => Promise<void>;
 }
 
 function DayColumn({
@@ -44,6 +46,7 @@ function DayColumn({
   availableTasks,
   onAdd,
   onDelete,
+  onUpdateLevel,
 }: DayColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-${dayIndex}` });
   const [adding, setAdding] = useState(false);
@@ -76,6 +79,7 @@ function DayColumn({
               key={a.assignment_id}
               assignment={a}
               onDelete={onDelete}
+              onUpdateLevel={onUpdateLevel}
             />
           ))}
         </SortableContext>
@@ -130,6 +134,7 @@ export function KanbanBoard({
   onMove,
   onAdd,
   onDelete,
+  onUpdateLevel,
 }: Props) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -169,6 +174,7 @@ export function KanbanBoard({
             availableTasks={availableTasks}
             onAdd={onAdd}
             onDelete={onDelete}
+            onUpdateLevel={onUpdateLevel}
           />
         ))}
       </div>

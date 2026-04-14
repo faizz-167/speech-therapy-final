@@ -69,6 +69,17 @@ export default function PlanPage() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Delete failed"),
   });
 
+  const updateLevelMutation = useMutation({
+    mutationFn: ({ assignmentId, levelName }: { assignmentId: string; levelName: string }) =>
+      api.patch<Assignment>(`/plans/${plan!.plan_id}/tasks/${assignmentId}`, { initial_level_name: levelName }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["therapist", "plan", id] });
+      qc.invalidateQueries({ queryKey: ["therapist", "plan-revisions", plan?.plan_id] });
+      toast.success("Task level updated.");
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Level update failed"),
+  });
+
   const approveMutation = useMutation({
     mutationFn: () => api.post(`/plans/${plan!.plan_id}/approve`, {}),
     onSuccess: () => {
@@ -94,7 +105,7 @@ export default function PlanPage() {
     }
   }
 
-  const isMutating = moveMutation.isPending || addMutation.isPending || deleteMutation.isPending;
+  const isMutating = moveMutation.isPending || addMutation.isPending || deleteMutation.isPending || updateLevelMutation.isPending;
   const mutationState = isMutating ? "saving" : "idle";
 
   if (isLoading) return <LoadingState label="Loading plan..." />;
@@ -153,6 +164,7 @@ export default function PlanPage() {
             onMove={(assignmentId, newDayIndex) => moveMutation.mutateAsync({ assignmentId, newDayIndex }).then(() => undefined)}
             onAdd={(taskId, dayIndex) => addMutation.mutateAsync({ taskId, dayIndex }).then(() => undefined)}
             onDelete={(assignmentId) => deleteMutation.mutateAsync(assignmentId).then(() => undefined)}
+            onUpdateLevel={(assignmentId, levelName) => updateLevelMutation.mutateAsync({ assignmentId, levelName }).then(() => undefined)}
           />
 
           {revisionHistory.length > 0 && (

@@ -15,6 +15,8 @@ export interface TaskExerciseState {
   completed_prompts: number;
   task_complete: boolean;
   current_prompt: Prompt | null;
+  escalated?: boolean;
+  escalation_message?: string;
 }
 
 export interface AttemptScore {

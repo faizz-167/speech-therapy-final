@@ -9,6 +9,8 @@ import redis
 from app.celery_app import celery_app
 from app.config import settings
 from app.scoring.engine import score_attempt, weights_from_db_row, ScoringWeights
+from app.utils.session_notes import parse_session_notes, serialize_session_notes
+from app.tasks.plan_regeneration import regenerate_plan_after_escalation
 
 
 def _get_conn():
@@ -404,6 +406,29 @@ def _create_review_notification(cur, therapist_id: str, patient_id: str, attempt
     )
 
 
+def _read_session_notes(cur, session_id: str) -> dict:
+    cur.execute(
+        "SELECT session_notes FROM session WHERE session_id = %s",
+        (session_id,),
+    )
+    row = cur.fetchone()
+    raw = row[0] if row else None
+    return parse_session_notes(raw)
+
+
+def _write_session_notes(cur, session_id: str, notes: dict) -> None:
+    cur.execute(
+        "UPDATE session SET session_notes = %s WHERE session_id = %s",
+        (serialize_session_notes(notes), session_id),
+    )
+
+
+def _get_task_name(cur, task_id: str) -> str:
+    cur.execute("SELECT name FROM task WHERE task_id = %s", (task_id,))
+    row = cur.fetchone()
+    return row[0] if row else "Unknown Task"
+
+
 def _mark_prompt_terminal(
     cur,
     session_id: str,
@@ -580,6 +605,45 @@ def analyze_attempt(self, attempt_id):
         conn.close()
         conn = None
 
+        # Retry guard: if this session is already marked escalated (committed by a prior
+        # successful run), skip all ML and mutations and just republish the WS event.
+        # Without this, a Celery retry re-inserts score_detail and re-updates progress
+        # before reaching the later notes["escalated"] check.
+        if attempt_number >= 3:
+            _rg_conn = _get_conn()
+            _rg_cur = _rg_conn.cursor()
+            _rg_notes = _read_session_notes(_rg_cur, str(session_id))
+            _rg_conn.close()
+            if _rg_notes.get("escalated"):
+                r = redis.from_url(settings.redis_url)
+                r.publish(
+                    f"ws:patient:{patient_id}",
+                    json.dumps({
+                        "type": "score_ready",
+                        "attempt_id": attempt_id,
+                        "attempt_number": attempt_number,
+                        "adaptive_decision": "escalated",
+                        "pass_fail": "fail",
+                        "final_score": 0.0,
+                        "performance_level": "needs_improvement",
+                        "dominant_emotion": "neutral",
+                        "speech_score": 0.0,
+                        "behavioral_score": 0.0,
+                        "engagement_score": 0.0,
+                        "word_accuracy": 0.0,
+                        "phoneme_accuracy": None,
+                        "pa_available": False,
+                        "fluency_score": 0.0,
+                        "speech_rate_wpm": 0,
+                        "speech_rate_score": 0.0,
+                        "confidence_score": 0.0,
+                        "asr_transcript": "",
+                        "review_recommended": False,
+                        "fail_reason": None,
+                    }),
+                )
+                return
+
         target_text = target_response
         if not target_text and speech_target and isinstance(speech_target, dict):
             target_text = speech_target.get("text")
@@ -614,6 +678,107 @@ def analyze_attempt(self, attempt_id):
                 level_id, adaptive_decision, 0.0, "fail",
             )
             _mark_prompt_terminal(cur, str(session_id), prompt_id, "fail", attempt_number)
+            _ns_notes = _read_session_notes(cur, str(session_id))
+            if str(prompt_id) not in _ns_notes["attempted_prompt_ids"]:
+                _ns_notes["attempted_prompt_ids"].append(str(prompt_id))
+            _write_session_notes(cur, str(session_id), _ns_notes)
+
+            # Adaptive intervention block for no-speech attempt 3.
+            # Mirrors the normal-scoring adaptive block; the initial "drop" in
+            # _upsert_patient_task_progress above is already applied, so the
+            # non-beginner branch here only increments interventions (no second upsert).
+            if attempt_number >= 3:
+                _ns_task_name = _get_task_name(cur, str(task_id)) if task_id else "Unknown Task"
+                cur.execute("SELECT level_name FROM task_level WHERE level_id = %s", (level_id,))
+                _ns_lvl_row = cur.fetchone()
+                _ns_level_name = _ns_lvl_row[0] if _ns_lvl_row else None
+
+                if _ns_notes.get("escalated"):
+                    adaptive_decision = "escalated"
+                elif _ns_notes["adaptive_interventions"] >= 2:
+                    _ns_notes["escalated"] = True
+                    _ns_notes["escalation_level"] = _ns_level_name
+                    _write_session_notes(cur, str(session_id), _ns_notes)
+                    adaptive_decision = "escalated"
+                    if assigned_therapist_id:
+                        cur.execute(
+                            "INSERT INTO therapist_notification"
+                            " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
+                            (
+                                str(uuid.uuid4()),
+                                assigned_therapist_id,
+                                "task_escalated",
+                                str(patient_id),
+                                str(attempt_id),
+                                f"Task '{_ns_task_name}' escalated after 2 failed interventions"
+                                f" (no speech detected). New plan will be generated at a lower level.",
+                            ),
+                        )
+                        regenerate_plan_after_escalation.delay(
+                            str(patient_id), str(assigned_therapist_id), _ns_level_name or "beginner"
+                        )
+                else:
+                    _ns_force_escalate = False
+                    if _ns_level_name == "beginner":
+                        cur.execute(
+                            "SELECT p.prompt_id FROM prompt p"
+                            " JOIN task_level tl ON tl.level_id = p.level_id"
+                            " WHERE tl.task_id = %s AND tl.level_name = 'beginner'",
+                            (str(task_id),),
+                        )
+                        _ns_all_beginner_ids = [str(r[0]) for r in cur.fetchall()]
+                        _ns_candidates = [pid for pid in _ns_all_beginner_ids
+                                          if pid not in _ns_notes["attempted_prompt_ids"]]
+                        if _ns_candidates:
+                            adaptive_decision = "alternate_prompt"
+                        else:
+                            _ns_force_escalate = True
+                    # Non-beginner: drop already applied above; just track the intervention.
+
+                    if _ns_force_escalate:
+                        _ns_notes["adaptive_interventions"] = 2
+                        _ns_notes["escalated"] = True
+                        _ns_notes["escalation_level"] = _ns_level_name
+                        _write_session_notes(cur, str(session_id), _ns_notes)
+                        adaptive_decision = "escalated"
+                        if assigned_therapist_id:
+                            cur.execute(
+                                "INSERT INTO therapist_notification"
+                                " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+                                " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
+                                (
+                                    str(uuid.uuid4()),
+                                    assigned_therapist_id,
+                                    "task_escalated",
+                                    str(patient_id),
+                                    str(attempt_id),
+                                    f"Task '{_ns_task_name}' escalated — no beginner candidates remain"
+                                    f" (no speech detected). New plan will be generated.",
+                                ),
+                            )
+                            regenerate_plan_after_escalation.delay(
+                                str(patient_id), str(assigned_therapist_id), _ns_level_name or "beginner"
+                            )
+                    else:
+                        _ns_notes["adaptive_interventions"] += 1
+                        _write_session_notes(cur, str(session_id), _ns_notes)
+                        if assigned_therapist_id:
+                            cur.execute(
+                                "INSERT INTO therapist_notification"
+                                " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+                                " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
+                                (
+                                    str(uuid.uuid4()),
+                                    assigned_therapist_id,
+                                    "task_attempt_failed",
+                                    str(patient_id),
+                                    str(attempt_id),
+                                    f"Patient failed '{_ns_task_name}' (no speech, attempt 3)."
+                                    f" Adaptive intervention {_ns_notes['adaptive_interventions']} of 2: {adaptive_decision}.",
+                                ),
+                            )
+
             _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
             if assigned_therapist_id:
                 _create_review_notification(cur, assigned_therapist_id, str(patient_id), str(attempt_id))
@@ -722,6 +887,113 @@ def analyze_attempt(self, attempt_id):
             level_id, adaptive_decision, final_score, pass_fail,
         )
         _mark_prompt_terminal(cur, str(session_id), prompt_id, pass_fail, attempt_number)
+
+        # Subtask 3.5 — track attempted_prompt_ids on every scored attempt
+        notes = _read_session_notes(cur, str(session_id))
+        if str(prompt_id) not in notes["attempted_prompt_ids"]:
+            notes["attempted_prompt_ids"].append(str(prompt_id))
+        _write_session_notes(cur, str(session_id), notes)
+
+        # Subtasks 3.6/3.7 — adaptive intervention block
+        if attempt_number == 3 and pass_fail == "fail":
+            task_name = _get_task_name(cur, str(task_id)) if task_id else "Unknown Task"
+            cur.execute("SELECT level_name FROM task_level WHERE level_id = %s", (level_id,))
+            _lvl_row = cur.fetchone()
+            current_level_name = _lvl_row[0] if _lvl_row else None
+
+            if notes["escalated"]:
+                # Celery retry guard — escalation already committed, republish WS
+                adaptive_decision = "escalated"
+            elif notes["adaptive_interventions"] >= 2:
+                # Force escalation
+                notes["escalated"] = True
+                notes["escalation_level"] = current_level_name
+                _write_session_notes(cur, str(session_id), notes)
+                if assigned_therapist_id:
+                    cur.execute(
+                        "INSERT INTO therapist_notification"
+                        " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+                        " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
+                        (
+                            str(uuid.uuid4()),
+                            assigned_therapist_id,
+                            "task_escalated",
+                            str(patient_id),
+                            str(attempt_id),
+                            f"Task '{task_name}' has been escalated after 2 failed interventions. "
+                            f"Final score: {final_score:.1f}. New plan will be generated at a lower level.",
+                        ),
+                    )
+                adaptive_decision = "escalated"
+                if assigned_therapist_id:
+                    regenerate_plan_after_escalation.delay(
+                        str(patient_id), str(assigned_therapist_id), current_level_name or "beginner"
+                    )
+            else:
+                force_escalate = False
+                if current_level_name == "beginner":
+                    cur.execute(
+                        "SELECT p.prompt_id FROM prompt p"
+                        " JOIN task_level tl ON tl.level_id = p.level_id"
+                        " WHERE tl.task_id = %s AND tl.level_name = 'beginner'",
+                        (str(task_id),),
+                    )
+                    all_beginner_ids = [str(r[0]) for r in cur.fetchall()]
+                    candidates = [pid for pid in all_beginner_ids
+                                  if pid not in notes["attempted_prompt_ids"]]
+                    if candidates:
+                        adaptive_decision = "alternate_prompt"
+                    else:
+                        force_escalate = True
+                else:
+                    # Drop already applied by the unconditional _upsert_patient_task_progress
+                    # above (line ~749). A second call here would double-drop the level.
+                    adaptive_decision = "drop"
+
+                if force_escalate:
+                    notes["adaptive_interventions"] = 2
+                    notes["escalated"] = True
+                    notes["escalation_level"] = current_level_name
+                    _write_session_notes(cur, str(session_id), notes)
+                    if assigned_therapist_id:
+                        cur.execute(
+                            "INSERT INTO therapist_notification"
+                            " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
+                            (
+                                str(uuid.uuid4()),
+                                assigned_therapist_id,
+                                "task_escalated",
+                                str(patient_id),
+                                str(attempt_id),
+                                f"Task '{task_name}' has been escalated after 2 failed interventions. "
+                                f"Final score: {final_score:.1f}. New plan will be generated at a lower level.",
+                            ),
+                        )
+                    adaptive_decision = "escalated"
+                    if assigned_therapist_id:
+                        regenerate_plan_after_escalation.delay(
+                            str(patient_id), str(assigned_therapist_id), current_level_name or "beginner"
+                        )
+                else:
+                    notes["adaptive_interventions"] += 1
+                    _write_session_notes(cur, str(session_id), notes)
+                    if assigned_therapist_id:
+                        cur.execute(
+                            "INSERT INTO therapist_notification"
+                            " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
+                            (
+                                str(uuid.uuid4()),
+                                assigned_therapist_id,
+                                "task_attempt_failed",
+                                str(patient_id),
+                                str(attempt_id),
+                                f"Patient failed '{task_name}' (attempt 3, score {final_score:.1f}). "
+                                f"Adaptive intervention {notes['adaptive_interventions']} of 2 applied: {adaptive_decision}.",
+                            ),
+                        )
+
         _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
         if review_recommended and assigned_therapist_id:
             _create_review_notification(cur, assigned_therapist_id, str(patient_id), str(attempt_id))

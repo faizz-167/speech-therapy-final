@@ -16,6 +16,7 @@ class AssignmentOut(BaseModel):
     day_index: int | None
     status: str
     priority_order: int | None
+    initial_level_name: str | None = None
 
 
 class PlanOut(BaseModel):
@@ -37,6 +38,7 @@ class AddTaskRequest(BaseModel):
 class UpdateAssignmentRequest(BaseModel):
     day_index: int | None = None
     status: str | None = None
+    initial_level_name: str | None = None
 
 
 class TaskForDefectOut(BaseModel):

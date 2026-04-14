@@ -36,8 +36,9 @@ export function ScoreDisplay({ score }: { score: AttemptScore }) {
             ["Speech Rate (WPM)", score.speech_rate_wpm],
             ["Speech Rate Score", score.speech_rate_score],
             ["Confidence", score.confidence_score],
+            ["Emotion Score", score.emotion_score],
             ["Engagement", score.engagement_score],
-            ["Emotion", score.dominant_emotion],
+            ["Dominant Emotion", score.dominant_emotion],
           ] as [string, number | string | undefined][]
         ).map(([label, value]) => (
           <div key={label}>

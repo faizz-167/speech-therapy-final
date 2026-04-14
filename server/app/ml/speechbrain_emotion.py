@@ -1,4 +1,12 @@
 from functools import lru_cache
+import logging
+import os
+import tempfile
+
+import torchaudio
+
+
+logger = logging.getLogger(__name__)
 
 EMOTION_MAP = {"ang": "angry", "hap": "happy", "sad": "sad", "neu": "neutral"}
 ENGAGEMENT_MULTIPLIERS = {
@@ -10,6 +18,7 @@ ENGAGEMENT_MULTIPLIERS = {
     "angry": 0.25,
     "fearful": 0.3,
 }
+TARGET_SAMPLE_RATE = 16000
 
 
 @lru_cache(maxsize=1)
@@ -39,11 +48,28 @@ def _to_scalar(value, default: float = 0.0) -> float:
         return default
 
 
+def _prepare_audio_for_classifier(audio_path: str) -> str:
+    waveform, sample_rate = torchaudio.load(audio_path)
+    if waveform.ndim == 1:
+        waveform = waveform.unsqueeze(0)
+    if waveform.size(0) > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+    if sample_rate != TARGET_SAMPLE_RATE:
+        waveform = torchaudio.functional.resample(waveform, sample_rate, TARGET_SAMPLE_RATE)
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
+        tmp_path = handle.name
+    torchaudio.save(tmp_path, waveform.cpu(), TARGET_SAMPLE_RATE)
+    return tmp_path
+
+
 def classify_emotion(audio_path: str) -> dict:
-    """Returns {dominant_emotion, emotion_score, engagement_score}"""
+    """Returns {dominant_emotion, emotion_score, engagement_score}."""
+    prepared_path = None
     try:
         classifier = _load_classifier()
-        out_prob, score, index, label = classifier.classify_file(audio_path)
+        prepared_path = _prepare_audio_for_classifier(audio_path)
+        out_prob, score, index, label = classifier.classify_file(prepared_path)
         raw_label = label[0] if label else None
         dominant_emotion = EMOTION_MAP.get(raw_label, raw_label)
         confidence = _to_scalar(score)
@@ -64,7 +90,8 @@ def classify_emotion(audio_path: str) -> dict:
             "confidence": round(confidence, 4),
             "inference_ok": True,
         }
-    except Exception:
+    except Exception as exc:
+        logger.warning("Emotion inference failed for %s: %s", audio_path, exc)
         return {
             "dominant_emotion": None,
             "emotion_score": 0.0,
@@ -72,3 +99,9 @@ def classify_emotion(audio_path: str) -> dict:
             "confidence": 0.0,
             "inference_ok": False,
         }
+    finally:
+        if prepared_path and os.path.exists(prepared_path):
+            try:
+                os.remove(prepared_path)
+            except OSError:
+                logger.warning("Could not remove temp emotion audio file: %s", prepared_path)

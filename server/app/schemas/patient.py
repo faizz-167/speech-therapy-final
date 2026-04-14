@@ -41,6 +41,8 @@ class TaskExerciseStateOut(BaseModel):
     completed_prompts: int
     task_complete: bool
     current_prompt: Optional[PromptOut]
+    escalated: bool = False
+    escalation_message: Optional[str] = None
 
 
 class PatientNotificationOut(BaseModel):
@@ -62,3 +64,8 @@ class TaskAssignmentOut(BaseModel):
     status: str
     priority_order: Optional[int] = None
     current_level: Optional[str] = None
+
+
+class TodayTasksResponse(BaseModel):
+    assignments: list[TaskAssignmentOut]
+    any_escalated: bool
