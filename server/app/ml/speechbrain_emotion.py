@@ -1,6 +1,7 @@
 from functools import lru_cache
 import logging
 import os
+from pathlib import Path
 import subprocess
 import tempfile
 
@@ -192,7 +193,8 @@ def classify_emotion(audio_path: str) -> dict:
     try:
         classifier = _load_classifier()
         prepared_path = _prepare_audio_for_classifier(audio_path)
-        out_prob, score, index, text_lab = classifier.classify_file(prepared_path)
+        classifier_input_path = Path(prepared_path).resolve().as_posix()
+        out_prob, score, index, text_lab = classifier.classify_file(classifier_input_path)
         probabilities = _probability_dict(classifier, out_prob)
         raw_label = _first_label(text_lab)
         if not raw_label and probabilities:
