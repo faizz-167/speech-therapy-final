@@ -7,7 +7,7 @@ import { NeoSelect } from "@/components/ui/NeoSelect";
 
 interface Props {
   assignment: Assignment;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => Promise<void>;
   onUpdateLevel: (id: string, levelName: string) => Promise<void>;
 }
 
@@ -36,8 +36,12 @@ export function KanbanTaskCard({ assignment, onDelete, onUpdateLevel }: Props) {
   const bgColor = colors[(assignment.task_name?.length || 0) % colors.length];
 
   async function handleSaveLevel() {
-    await onUpdateLevel(assignment.assignment_id, selectedLevel);
-    setEditingLevel(false);
+    try {
+      await onUpdateLevel(assignment.assignment_id, selectedLevel);
+      setEditingLevel(false);
+    } catch {
+      // Mutation errors are handled by the page-level toast; keep the editor open.
+    }
   }
 
   return (
@@ -72,7 +76,11 @@ export function KanbanTaskCard({ assignment, onDelete, onUpdateLevel }: Props) {
             Edit
           </button>
           <button
-            onClick={() => onDelete(assignment.assignment_id)}
+            onClick={() => {
+              void onDelete(assignment.assignment_id).catch(() => {
+                // Mutation errors are handled by the page-level toast.
+              });
+            }}
             className="border-2 border-neo-black w-6 h-6 flex flex-shrink-0 items-center justify-center font-black bg-white hover:bg-neo-accent transition-colors"
           >
             ✕

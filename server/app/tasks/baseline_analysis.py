@@ -27,13 +27,42 @@ def _as_float(value, default: float = 0.0) -> float:
 
 
 def _compute_speech_rate_score(wpm: float, ideal_min: int = 80, ideal_max: int = 120, tolerance: int = 20) -> float:
+    if wpm <= 0:
+        return 0.0
+    tolerance = max(1, tolerance)
     if ideal_min <= wpm <= ideal_max:
         return 100.0
     if wpm < ideal_min:
         diff = ideal_min - wpm
-        return max(0.0, 100.0 - (diff / tolerance) * 30)
-    diff = wpm - ideal_max
-    return max(0.0, 100.0 - (diff / tolerance) * 30)
+    else:
+        diff = wpm - ideal_max
+
+    if diff <= tolerance:
+        return round(100.0 - ((diff / tolerance) * 25.0), 2)
+    if diff <= tolerance * 2:
+        return round(75.0 - (((diff - tolerance) / tolerance) * 35.0), 2)
+    return round(max(0.0, 40.0 - (((diff - (tolerance * 2)) / (tolerance * 2)) * 40.0)), 2)
+
+
+def _compute_speech_rate_wpm(transcript: str, duration: float, words: list[dict] | None = None) -> float:
+    word_count = len(transcript.split())
+    if word_count == 0:
+        return 0.0
+
+    timed_words = [
+        word
+        for word in (words or [])
+        if word.get("start") is not None and word.get("end") is not None
+    ]
+    if len(timed_words) >= 2:
+        speech_span = float(timed_words[-1]["end"]) - float(timed_words[0]["start"])
+    elif len(timed_words) == 1:
+        speech_span = float(timed_words[0]["end"]) - float(timed_words[0]["start"])
+    else:
+        speech_span = duration
+
+    speech_span = max(0.5, speech_span)
+    return (word_count / speech_span) * 60
 
 
 def _weighted_score(components: list[tuple[float, float, bool]]) -> float:
@@ -130,6 +159,7 @@ def analyze_baseline_attempt(self, attempt_id: str):
         transcript = asr["transcript"]
         duration = _as_float(asr["duration"])
         avg_confidence = _as_float(asr["avg_confidence"])
+        words = asr.get("words") or []
 
         phoneme_result = align_phonemes(
             audio_path,
@@ -137,14 +167,20 @@ def analyze_baseline_attempt(self, attempt_id: str):
             target_phonemes=_parse_target_phonemes(target_phoneme),
             reference_text=expected_output,
         )
-        disfluency_result = score_disfluency(transcript, duration)
+        disfluency_result = score_disfluency(transcript, duration, words)
         emotion_result = classify_emotion(audio_path)
 
         pa_available = bool(phoneme_result.get("inference_ok"))
         pa = _as_float(phoneme_result.get("phoneme_accuracy"), 0.0) if pa_available else None
         fs = _as_float(disfluency_result["fluency_score"], 50.0)
-        wpm = _as_float((len(transcript.split()) / duration * 60) if duration > 0 else 0)
-        speech_rate_score = _compute_speech_rate_score(wpm)
+        wpm = _as_float(_compute_speech_rate_wpm(transcript, duration, words))
+        speech_rate_range = wpm_range if isinstance(wpm_range, dict) else {}
+        speech_rate_score = _compute_speech_rate_score(
+            wpm,
+            int(speech_rate_range.get("min", 80)),
+            int(speech_rate_range.get("max", 120)),
+            int(speech_rate_range.get("tolerance", 20)),
+        )
         dominant_emotion = emotion_result.get("dominant_emotion")
         emotion_score = _as_float(emotion_result.get("emotion_score"), 0.0)
         engagement_score = _as_float(emotion_result.get("engagement_score"), 0.0)

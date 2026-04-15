@@ -36,15 +36,40 @@ def _compute_word_accuracy(transcript, target_text):
     return round((len(matches) / len(target_words)) * 100, 2)
 
 
+def _compute_speech_rate_wpm(transcript: str, duration: float, words: list[dict] | None = None) -> float:
+    word_count = len(transcript.split())
+    if word_count == 0:
+        return 0.0
+
+    timed_words = [
+        word
+        for word in (words or [])
+        if word.get("start") is not None and word.get("end") is not None
+    ]
+    if len(timed_words) >= 2:
+        speech_span = float(timed_words[-1]["end"]) - float(timed_words[0]["start"])
+    elif len(timed_words) == 1:
+        speech_span = float(timed_words[0]["end"]) - float(timed_words[0]["start"])
+    else:
+        speech_span = duration
+
+    speech_span = max(0.5, speech_span)
+    return (word_count / speech_span) * 60
+
+
 def _compute_speech_rate_score(wpm, ideal_min=80, ideal_max=120, tolerance=20):
+    if wpm <= 0:
+        return 0.0
+    tolerance = max(1, tolerance)
     if ideal_min <= wpm <= ideal_max:
         return 100.0
-    elif wpm < ideal_min:
-        diff = ideal_min - wpm
-        return max(0.0, 100.0 - (diff / tolerance) * 30)
-    else:
-        diff = wpm - ideal_max
-        return max(0.0, 100.0 - (diff / tolerance) * 30)
+
+    diff = (ideal_min - wpm) if wpm < ideal_min else (wpm - ideal_max)
+    if diff <= tolerance:
+        return round(100.0 - ((diff / tolerance) * 25.0), 2)
+    if diff <= tolerance * 2:
+        return round(75.0 - (((diff - tolerance) / tolerance) * 35.0), 2)
+    return round(max(0.0, 40.0 - (((diff - (tolerance * 2)) / (tolerance * 2)) * 40.0)), 2)
 
 
 def _compute_rl_score(mic_at, speech_at):
@@ -139,6 +164,40 @@ def _parse_target_phonemes(value) -> list[str]:
     return []
 
 
+CLINICAL_EMOTION_BASE_SCORES = {
+    "child": {
+        "happy": 95.0,
+        "neutral": 80.0,
+        "sad": 50.0,
+        "angry": 35.0,
+    },
+    "adult": {
+        "happy": 85.0,
+        "neutral": 90.0,
+        "sad": 50.0,
+        "angry": 35.0,
+    },
+    "senior": {
+        "happy": 85.0,
+        "neutral": 90.0,
+        "sad": 50.0,
+        "angry": 35.0,
+    },
+}
+
+
+def _score_clinical_emotion(emotion_result: dict, age_group: str) -> float | None:
+    dominant_emotion = str(emotion_result.get("dominant_emotion") or "").lower()
+    age_scores = CLINICAL_EMOTION_BASE_SCORES.get(age_group) or CLINICAL_EMOTION_BASE_SCORES["adult"]
+    if dominant_emotion not in age_scores:
+        return None
+
+    raw_emotion_score = _as_float(emotion_result.get("emotion_score"))
+    confidence = _as_float(emotion_result.get("confidence"), default=raw_emotion_score / 100.0)
+    confidence = min(1.0, max(0.0, confidence))
+    return round(min(100.0, max(0.0, age_scores[dominant_emotion] * confidence)), 2)
+
+
 def _build_emotion_weight_map(row) -> dict[str, float]:
     if not row:
         return {}
@@ -155,9 +214,13 @@ def _build_emotion_weight_map(row) -> dict[str, float]:
     }
 
 
-def _score_emotion_with_config(emotion_result: dict, emotion_weights_row) -> float:
+def _score_emotion_with_config(emotion_result: dict, emotion_weights_row, age_group: str = "adult") -> float:
     raw_emotion_score = _as_float(emotion_result.get("emotion_score"))
     dominant_emotion = emotion_result.get("dominant_emotion")
+    clinical_score = _score_clinical_emotion(emotion_result, age_group)
+    if clinical_score is not None:
+        return clinical_score
+
     if not dominant_emotion or emotion_weights_row is None:
         return raw_emotion_score
 
@@ -211,7 +274,7 @@ def _build_ws_payload(
     wa: float, pa: float | None, pa_available: bool, fs: float,
     wpm: int, srs: float, cs: float,
     speech_score: float, behavioral_score: float, engagement_score: float,
-    final_score: float, pass_fail: str, adaptive_decision: str,
+    emotion_score: float, final_score: float, pass_fail: str, adaptive_decision: str,
     performance_level: str, dominant_emotion: str,
     review_recommended: bool, fail_reason: str | None,
 ) -> dict:
@@ -227,6 +290,7 @@ def _build_ws_payload(
         "speech_score": speech_score,
         "behavioral_score": behavioral_score,
         "engagement_score": engagement_score,
+        "emotion_score": emotion_score,
         "word_accuracy": wa,
         "phoneme_accuracy": pa,
         "pa_available": pa_available,
@@ -789,7 +853,7 @@ def analyze_attempt(self, attempt_id):
                 json.dumps(_build_ws_payload(
                     attempt_id, attempt_number, transcript,
                     0.0, None, False, 0.0, 0, 0.0, 0.0,
-                    0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 0.0,
                     0.0, "fail", adaptive_decision, "needs_improvement", "neutral",
                     True, "No speech detected",
                 )),
@@ -797,16 +861,18 @@ def analyze_attempt(self, attempt_id):
             return
 
         target_phonemes = _parse_target_phonemes(prompt_target_phonemes)
+        words = asr.get("words") or []
+
         phoneme_result = align_phonemes(
             audio_path,
             transcript,
             target_phonemes=target_phonemes,
             reference_text=target_text,
         )
-        disfluency_result = score_disfluency(transcript, duration)
+        disfluency_result = score_disfluency(transcript, duration, words)
         emotion_result = classify_emotion(audio_path)
 
-        wpm = _as_float((len(transcript.split()) / duration * 60) if duration > 0 else 0)
+        wpm = _as_float(_compute_speech_rate_wpm(transcript, duration, words))
         wa_available = bool(target_text)
         if wa_available:
             wa = _as_float(_compute_word_accuracy(transcript, target_text), default=0.0)
@@ -820,7 +886,7 @@ def analyze_attempt(self, attempt_id):
         rl_score = _as_float(_compute_rl_score(str(mic_at) if mic_at else None, str(speech_at) if speech_at else None), default=70.0)
         tc_score = _as_float(_compute_tc_score(transcript, target_word_count, target_duration_sec, duration), default=80.0)
         aq_score = _as_float(_compute_aq_score(transcript), default=30.0)
-        emotion_score = _score_emotion_with_config(emotion_result, emotion_weights_row)
+        emotion_score = _score_emotion_with_config(emotion_result, emotion_weights_row, age_group)
         dominant_emotion = emotion_result.get("dominant_emotion")
 
         scores = score_attempt(
@@ -1006,7 +1072,7 @@ def analyze_attempt(self, attempt_id):
                 attempt_id, attempt_number, transcript,
                 wa, pa, pa_available, fs, wpm_int, srs, cs,
                 speech_score, behavioral_score, engagement_score,
-                final_score, pass_fail, adaptive_decision, performance_level, dominant_emotion,
+                emotion_score, final_score, pass_fail, adaptive_decision, performance_level, dominant_emotion,
                 review_recommended, fail_reason,
             )),
         )

@@ -1,5 +1,10 @@
-# Install this environment with Python 3.13 for now.
-# Python 3.14 causes source-build failures with some pinned backend dependencies.
+# Install this environment with Python 3.11 for now.
+# `openai-whisper` currently documents compatibility through Python 3.11, and
+# Python 3.13 fails during package build in this project.
+# Install with:
+#   python -m pip install --build-constraint build-constraints.txt -r requirements.txt
+# `openai-whisper` still imports `pkg_resources` during its build, so newer
+# setuptools releases in isolated build envs can break the install.
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 sqlalchemy[asyncio]==2.0.36
@@ -19,6 +24,9 @@ openai-whisper==20240930
 torch==2.5.1
 torchaudio==2.5.1
 speechbrain==1.0.2
+huggingface-hub<1.0
+transformers==4.46.3
+soundfile==0.12.1
 spacy==3.8.3
 httpx==0.28.1
 aiofiles==24.1.0

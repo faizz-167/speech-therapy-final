@@ -54,9 +54,13 @@ function DayColumn({
 
   async function handleAdd() {
     if (!selectedTask) return;
-    await onAdd(selectedTask, dayIndex);
-    setSelectedTask("");
-    setAdding(false);
+    try {
+      await onAdd(selectedTask, dayIndex);
+      setSelectedTask("");
+      setAdding(false);
+    } catch {
+      // Mutation errors are handled by the page-level toast; avoid unhandled rejections here.
+    }
   }
 
   return (
@@ -151,7 +155,9 @@ export function KanbanBoard({
         (a) => a.assignment_id === String(active.id)
       );
       if (assignment && assignment.day_index !== newDayIndex) {
-        onMove(String(active.id), newDayIndex);
+        void onMove(String(active.id), newDayIndex).catch(() => {
+          // Mutation errors are handled by the page-level toast; avoid unhandled rejections here.
+        });
       }
     }
   }

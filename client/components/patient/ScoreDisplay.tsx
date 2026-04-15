@@ -1,8 +1,15 @@
 import { NeoCard } from "@/components/ui/NeoCard";
 import type { AttemptScore } from "@/types";
 
+function formatEmotion(value: string | null | undefined): string {
+  if (!value) return "Waiting for emotion";
+  return value.replace(/_/g, " ");
+}
+
 export function ScoreDisplay({ score }: { score: AttemptScore }) {
   const isPassed = score.pass_fail === "pass";
+  const emotionLabel = formatEmotion(score.dominant_emotion);
+
   return (
     <div className="space-y-4 animate-pop-in">
       <NeoCard accent={isPassed ? "secondary" : "accent"} className="text-center space-y-2">
@@ -27,6 +34,19 @@ export function ScoreDisplay({ score }: { score: AttemptScore }) {
         )}
       </NeoCard>
 
+      <NeoCard accent="secondary" className="flex items-center justify-between gap-4">
+        <div>
+          <p className="font-black uppercase text-xs text-neo-black/70">Detected Emotion</p>
+          <p className="font-black text-2xl capitalize">{emotionLabel}</p>
+        </div>
+        <div className="text-right">
+          <p className="font-black uppercase text-xs text-neo-black/70">Emotion Score</p>
+          <p className="font-black text-xl">
+            {typeof score.emotion_score === "number" ? `${score.emotion_score.toFixed(1)}%` : "--"}
+          </p>
+        </div>
+      </NeoCard>
+
       <NeoCard className="grid grid-cols-2 gap-3 text-sm">
         {(
           [
@@ -38,7 +58,7 @@ export function ScoreDisplay({ score }: { score: AttemptScore }) {
             ["Confidence", score.confidence_score],
             ["Emotion Score", score.emotion_score],
             ["Engagement", score.engagement_score],
-            ["Dominant Emotion", score.dominant_emotion],
+            ["Dominant Emotion", emotionLabel],
           ] as [string, number | string | undefined][]
         ).map(([label, value]) => (
           <div key={label}>

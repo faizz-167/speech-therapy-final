@@ -3,6 +3,8 @@ __pycache__/
 *.pyo
 .env
 uploads/
+tmp_emotion_model/
+wav2vec2_checkpoints/
 *.egg-info/
 dist/
 build/

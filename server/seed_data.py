@@ -180,13 +180,13 @@ assert len(DEFECTS) == 30, f"Expected 30 defects, got {len(DEFECTS)}"
 
 EMOTION_WEIGHTS = [
     {"config_id": "ewc_child", "age_group": "child",
-     "w_happy": 0.25, "w_excited": 0.20, "w_neutral": 0.15, "w_surprised": 0.10,
-     "w_sad": 0.05,  "w_angry": 0.00,   "w_fearful": 0.05, "w_positive_affect": 0.15,
-     "w_focused": 0.05, "version": 1},
+     "w_happy": 0.95, "w_excited": 0.90, "w_neutral": 0.80, "w_surprised": 0.75,
+     "w_sad": 0.50,  "w_angry": 0.35,   "w_fearful": 0.35, "w_positive_affect": 0.00,
+     "w_focused": 0.00, "version": 2},
     {"config_id": "ewc_adult", "age_group": "adult",
-     "w_happy": 0.15, "w_excited": 0.10, "w_neutral": 0.20, "w_surprised": 0.05,
-     "w_sad": 0.05,  "w_angry": 0.00,   "w_fearful": 0.05, "w_positive_affect": 0.15,
-     "w_focused": 0.25, "version": 1},
+     "w_happy": 0.85, "w_excited": 0.80, "w_neutral": 0.90, "w_surprised": 0.75,
+     "w_sad": 0.50,  "w_angry": 0.35,   "w_fearful": 0.35, "w_positive_affect": 0.00,
+     "w_focused": 0.00, "version": 2},
 ]
 
 
@@ -2449,7 +2449,17 @@ def seed_emotion_weights(conn):
              w_sad, w_angry, w_fearful, w_positive_affect, w_focused, version, created_at)
             VALUES (:config_id, :age_group, :w_happy, :w_excited, :w_neutral, :w_surprised,
                     :w_sad, :w_angry, :w_fearful, :w_positive_affect, :w_focused, :version, NOW())
-            ON CONFLICT (config_id) DO NOTHING
+            ON CONFLICT (config_id) DO UPDATE SET
+                w_happy = EXCLUDED.w_happy,
+                w_excited = EXCLUDED.w_excited,
+                w_neutral = EXCLUDED.w_neutral,
+                w_surprised = EXCLUDED.w_surprised,
+                w_sad = EXCLUDED.w_sad,
+                w_angry = EXCLUDED.w_angry,
+                w_fearful = EXCLUDED.w_fearful,
+                w_positive_affect = EXCLUDED.w_positive_affect,
+                w_focused = EXCLUDED.w_focused,
+                version = EXCLUDED.version
         """), e)
     conn.commit()
     print(f"  Seeded {len(EMOTION_WEIGHTS)} emotion weight configs")

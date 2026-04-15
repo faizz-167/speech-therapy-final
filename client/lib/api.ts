@@ -50,7 +50,8 @@ async function request<T>(
   if (token) headers["Authorization"] = `Bearer ${token}`;
   if (!(rest.body instanceof FormData)) headers["Content-Type"] = "application/json";
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const url = `${BASE_URL}${path}`;
+    const res = await fetch(url, {
       ...rest,
       credentials: "include",
       headers,
@@ -73,6 +74,15 @@ async function request<T>(
       throw new Error(err.detail ?? "Request failed");
     }
     return res.json() as Promise<T>;
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeout}ms: ${path}`);
+    }
+    if (error instanceof TypeError) {
+      throw new Error(`Unable to reach the API at ${BASE_URL}. Make sure the backend is running and CORS/origin settings match.`);
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }

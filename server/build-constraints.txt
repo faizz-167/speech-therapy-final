@@ -1,0 +1,3 @@
+# `openai-whisper`'s build currently relies on `pkg_resources`, which is not
+# available in newer setuptools releases. Constrain the isolated build env.
+setuptools<81
