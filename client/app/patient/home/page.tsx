@@ -19,10 +19,10 @@ function formatPlanDate(value: string | null): string {
 export default function PatientHomePage() {
   const results = useQueries({
     queries: [
-      { queryKey: ["patient", "home"], queryFn: () => api.get<HomeData>("/patient/home") },
-      { queryKey: ["patient", "profile"], queryFn: () => api.get<PatientProfile>("/patient/profile").catch(() => null) },
-      { queryKey: ["patient", "tasks"], queryFn: () => api.get<Assignment[]>("/patient/tasks").catch(() => [] as Assignment[]) },
-      { queryKey: ["patient", "baseline-result"], queryFn: () => api.get<BaselineResult | null>("/baseline/result").catch(() => null) },
+      { queryKey: ["patient", "home"], queryFn: () => api.get<HomeData>("/patient/home"), refetchOnWindowFocus: true, refetchInterval: 15000 },
+      { queryKey: ["patient", "profile"], queryFn: () => api.get<PatientProfile>("/patient/profile").catch(() => null), refetchOnWindowFocus: true },
+      { queryKey: ["patient", "tasks"], queryFn: () => api.get<Assignment[]>("/patient/tasks").catch(() => [] as Assignment[]), refetchOnWindowFocus: true, refetchInterval: 15000 },
+      { queryKey: ["patient", "baseline-result"], queryFn: () => api.get<BaselineResult | null>("/baseline/result").catch(() => null), refetchOnWindowFocus: true },
     ],
   });
 

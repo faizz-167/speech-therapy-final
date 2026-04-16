@@ -182,10 +182,11 @@ export default function PatientDetailPage() {
       )}
 
       {patient.status === "approved" && (
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <Link href={`/therapist/patients/${id}/baseline`}><NeoButton variant="ghost">View Baseline</NeoButton></Link>
           <Link href={`/therapist/patients/${id}/plan`}><NeoButton>Manage Plan</NeoButton></Link>
           <Link href={`/therapist/patients/${id}/progress`}><NeoButton variant="secondary">Progress</NeoButton></Link>
+          <Link href={`/therapist/patients/${id}/adaptations`}><NeoButton variant="secondary">Adaptations</NeoButton></Link>
         </div>
       )}
     </div>

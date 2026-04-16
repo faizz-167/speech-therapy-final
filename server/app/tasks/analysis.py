@@ -249,6 +249,30 @@ def _score_emotion_with_config(emotion_result: dict, emotion_weights_row, age_gr
     return round(min(100.0, max(0.0, weighted_score)), 2)
 
 
+def _apply_emotion_priority_override(
+    scores: dict,
+    dominant_emotion: str | None,
+    emotion_score: float,
+) -> dict:
+    normalized_emotion = str(dominant_emotion or "").strip().lower()
+    updated = dict(scores)
+
+    if normalized_emotion in {"angry", "fearful"} and emotion_score <= 40.0:
+        if updated.get("adaptive_decision") == "advance":
+            updated["adaptive_decision"] = "stay"
+        updated["performance_level"] = "support_needed"
+        return updated
+
+    if normalized_emotion == "sad" and emotion_score <= 55.0:
+        if updated.get("adaptive_decision") == "advance":
+            updated["adaptive_decision"] = "stay"
+        if updated.get("performance_level") == "advanced":
+            updated["performance_level"] = "support_needed"
+        return updated
+
+    return updated
+
+
 _SCORE_INSERT_SQL = (
     "INSERT INTO attempt_score_detail ("
     " detail_id, attempt_id, word_accuracy, phoneme_accuracy, pa_available, fluency_score,"
@@ -493,6 +517,239 @@ def _get_task_name(cur, task_id: str) -> str:
     return row[0] if row else "Unknown Task"
 
 
+_LEVEL_DROP_MAP = {
+    "advanced": "intermediate",
+    "intermediate": "beginner",
+    "beginner": "beginner",
+}
+
+
+def _get_level_name_from_level_id(cur, level_id: str | None) -> str | None:
+    if not level_id:
+        return None
+    cur.execute("SELECT level_name FROM task_level WHERE level_id = %s", (level_id,))
+    row = cur.fetchone()
+    return str(row[0]).lower() if row and row[0] else None
+
+
+def _get_prompt_ids_for_level(cur, task_id: str, level_name: str) -> list[str]:
+    cur.execute(
+        "SELECT p.prompt_id"
+        " FROM prompt p"
+        " JOIN task_level tl ON tl.level_id = p.level_id"
+        " WHERE tl.task_id = %s AND tl.level_name = %s"
+        " ORDER BY p.prompt_id ASC",
+        (task_id, level_name),
+    )
+    return [str(row[0]) for row in cur.fetchall()]
+
+
+def _find_pending_queue_item(notes: dict, prompt_id: str) -> tuple[int | None, dict | None]:
+    queue_items = notes.get("queue_items") or []
+    for idx, item in enumerate(queue_items):
+        if item.get("status") == "pending" and str(item.get("prompt_id")) == str(prompt_id):
+            return idx, item
+    for idx, item in enumerate(queue_items):
+        if item.get("status") == "pending":
+            return idx, item
+    return None, None
+
+
+def _reassign_pending_queue_items(cur, task_id: str, notes: dict, new_level_name: str) -> None:
+    queue_items = notes.get("queue_items") or []
+    pending_indices = [idx for idx, item in enumerate(queue_items) if item.get("status") == "pending"]
+    prompt_ids = _get_prompt_ids_for_level(cur, task_id, new_level_name)
+    if not prompt_ids:
+        return
+    for offset, idx in enumerate(pending_indices):
+        previous_level_name = queue_items[idx].get("level_name")
+        queue_items[idx]["level_name"] = new_level_name
+        queue_items[idx]["prompt_id"] = prompt_ids[offset % len(prompt_ids)]
+        queue_items[idx]["adapted_from_level"] = queue_items[idx].get("adapted_from_level") or previous_level_name
+    notes["queue_items"] = queue_items
+
+
+def _append_remedial_queue_item(cur, task_id: str, notes: dict, new_level_name: str, reason_code: str) -> None:
+    prompt_ids = _get_prompt_ids_for_level(cur, task_id, new_level_name)
+    if not prompt_ids:
+        return
+    queue_items = notes.get("queue_items") or []
+    used_prompt_ids = {str(item.get("prompt_id")) for item in queue_items}
+    chosen_prompt_id = next((pid for pid in prompt_ids if pid not in used_prompt_ids), prompt_ids[0])
+    queue_items.append(
+        {
+            "queue_item_id": str(uuid.uuid4()),
+            "prompt_id": chosen_prompt_id,
+            "level_name": new_level_name,
+            "source_type": "remedial",
+            "status": "pending",
+            "attempts_used": 0,
+            "adapted_from_level": None,
+            "reason_code": reason_code,
+        }
+    )
+    notes["queue_items"] = queue_items
+
+
+def _build_adaptation_report(
+    cur,
+    session_id: str,
+    task_id: str,
+    task_name: str,
+    notes: dict,
+) -> dict:
+    cur.execute(
+        "SELECT spa.prompt_id, spa.attempt_number, spa.result,"
+        " asd.word_accuracy, asd.fluency_score, asd.speech_rate_score,"
+        " asd.confidence_score, asd.dominant_emotion, asd.fail_reason"
+        " FROM session_prompt_attempt spa"
+        " LEFT JOIN attempt_score_detail asd ON asd.attempt_id = spa.attempt_id"
+        " WHERE spa.session_id = %s"
+        " ORDER BY spa.created_at ASC",
+        (session_id,),
+    )
+    attempt_rows = cur.fetchall()
+    attempts = [
+        {
+            "prompt_id": str(row[0]),
+            "attempt_number": int(row[1]) if row[1] is not None else None,
+            "result": row[2],
+            "word_accuracy": float(row[3]) if row[3] is not None else None,
+            "fluency_score": float(row[4]) if row[4] is not None else None,
+            "speech_rate_score": float(row[5]) if row[5] is not None else None,
+            "confidence_score": float(row[6]) if row[6] is not None else None,
+            "dominant_emotion": row[7],
+            "fail_reason": row[8],
+        }
+        for row in attempt_rows
+    ]
+    return {
+        "task_id": task_id,
+        "task_name": task_name,
+        "adaptation_count": int(notes.get("adaptive_interventions") or 0),
+        "current_level": notes.get("current_queue_level"),
+        "adaptation_history": notes.get("adaptation_history") or [],
+        "queue_items": notes.get("queue_items") or [],
+        "attempts": attempts,
+    }
+
+
+def _apply_session_queue_result(
+    cur,
+    session_id: str,
+    task_id: str,
+    prompt_id: str,
+    pass_fail: str,
+    attempt_number: int,
+    level_id: str | None,
+    fail_reason: str | None,
+    final_score: float,
+    patient_id: str,
+    assigned_therapist_id: str | None,
+    attempt_id: str,
+) -> tuple[dict, bool, dict]:
+    notes = _read_session_notes(cur, session_id)
+    if str(prompt_id) not in notes["attempted_prompt_ids"]:
+        notes["attempted_prompt_ids"].append(str(prompt_id))
+
+    queue_items = notes.get("queue_items") or []
+    if not notes.get("queue_initialized") or not queue_items:
+        _write_session_notes(cur, session_id, notes)
+        return notes, False, {}
+
+    queue_idx, queue_item = _find_pending_queue_item(notes, prompt_id)
+    if queue_item is None or queue_idx is None:
+        _write_session_notes(cur, session_id, notes)
+        return notes, True, {}
+
+    queue_item["attempts_used"] = max(int(queue_item.get("attempts_used") or 0), attempt_number)
+    notes["current_queue_level"] = queue_item.get("level_name") or notes.get("current_queue_level")
+
+    if pass_fail == "pass":
+        queue_item["status"] = "passed"
+        notes["queue_items"][queue_idx] = queue_item
+        _write_session_notes(cur, session_id, notes)
+        return notes, True, {"adaptive_decision": "stay"}
+
+    if attempt_number < 3:
+        notes["queue_items"][queue_idx] = queue_item
+        _write_session_notes(cur, session_id, notes)
+        return notes, True, {}
+
+    queue_item["status"] = "failed_terminal"
+    queue_item["reason_code"] = fail_reason or "max_attempts_reached"
+    notes["queue_items"][queue_idx] = queue_item
+
+    current_level_name = str(
+        queue_item.get("level_name")
+        or _get_level_name_from_level_id(cur, level_id)
+        or notes.get("current_queue_level")
+        or "beginner"
+    ).lower()
+    new_level_name = _LEVEL_DROP_MAP.get(current_level_name, "beginner")
+
+    notes["adaptive_interventions"] = int(notes.get("adaptive_interventions") or 0) + 1
+    notes["current_queue_level"] = new_level_name
+    notes["adaptation_history"].append(
+        {
+            "queue_item_id": queue_item.get("queue_item_id"),
+            "prompt_id": str(prompt_id),
+            "from_level": current_level_name,
+            "to_level": new_level_name,
+            "attempts_used": attempt_number,
+            "reason": fail_reason or "max_attempts_reached",
+            "final_score": round(final_score, 2),
+        }
+    )
+
+    task_name = _get_task_name(cur, str(task_id)) if task_id else "Unknown Task"
+    if int(notes.get("adaptive_interventions") or 0) >= 2:
+        notes["locked_for_review"] = True
+        notes["escalated"] = True
+        notes["escalation_level"] = new_level_name
+        for item in notes["queue_items"]:
+            if item.get("status") == "pending":
+                item["status"] = "skipped_due_to_lock"
+        notes["adaptation_report"] = _build_adaptation_report(cur, session_id, str(task_id), task_name, notes)
+        _write_session_notes(cur, session_id, notes)
+        if assigned_therapist_id:
+            cur.execute(
+                "INSERT INTO therapist_notification"
+                " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+                " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
+                (
+                    str(uuid.uuid4()),
+                    assigned_therapist_id,
+                    "task_escalated",
+                    patient_id,
+                    attempt_id,
+                    f"Task '{task_name}' is locked for therapist review after 2 level adaptations. "
+                    f"Current level recommendation: {new_level_name}. Review the session report before regenerating the plan.",
+                ),
+            )
+        return notes, True, {"adaptive_decision": "escalated", "performance_level": "needs_improvement"}
+
+    _reassign_pending_queue_items(cur, str(task_id), notes, new_level_name)
+    _append_remedial_queue_item(cur, str(task_id), notes, new_level_name, fail_reason or "level_downgrade")
+    _write_session_notes(cur, session_id, notes)
+    if assigned_therapist_id:
+        cur.execute(
+            "INSERT INTO therapist_notification"
+            " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
+            (
+                str(uuid.uuid4()),
+                assigned_therapist_id,
+                "task_attempt_failed",
+                patient_id,
+                attempt_id,
+                f"Task '{task_name}' adapted from {current_level_name} to {new_level_name} "
+                f"after {attempt_number} failed attempts. A remedial exercise was appended.",
+            ),
+        )
+    return notes, True, {"adaptive_decision": "drop", "performance_level": "needs_improvement"}
+
+
 def _mark_prompt_terminal(
     cur,
     session_id: str,
@@ -721,6 +978,7 @@ def analyze_attempt(self, attempt_id):
             conn = _get_conn()
             cur = conn.cursor()
             adaptive_decision = "drop" if attempt_number >= 3 else "stay"
+            progress_adaptive_decision = adaptive_decision
             _exec_insert_score_detail(
                 cur,
                 (
@@ -737,111 +995,33 @@ def analyze_attempt(self, attempt_id):
                 " WHERE attempt_id=%s",
                 ("fail", transcript, attempt_id),
             )
+            _mark_prompt_terminal(cur, str(session_id), prompt_id, "fail", attempt_number)
+            _ns_notes, _queue_active, _queue_override = _apply_session_queue_result(
+                cur,
+                str(session_id),
+                str(task_id) if task_id else "",
+                str(prompt_id),
+                "fail",
+                attempt_number,
+                level_id,
+                "No speech detected",
+                0.0,
+                str(patient_id),
+                str(assigned_therapist_id) if assigned_therapist_id else None,
+                str(attempt_id),
+            )
+            if _queue_override:
+                adaptive_decision = _queue_override.get("adaptive_decision", adaptive_decision)
+                cur.execute(
+                    "UPDATE attempt_score_detail SET adaptive_decision=%s, performance_level=%s WHERE attempt_id=%s",
+                    (adaptive_decision, "needs_improvement", attempt_id),
+                )
+            if adaptive_decision != "escalated":
+                progress_adaptive_decision = adaptive_decision
             _upsert_patient_task_progress(
                 cur, str(patient_id), task_id,
-                level_id, adaptive_decision, 0.0, "fail",
+                level_id, progress_adaptive_decision, 0.0, "fail",
             )
-            _mark_prompt_terminal(cur, str(session_id), prompt_id, "fail", attempt_number)
-            _ns_notes = _read_session_notes(cur, str(session_id))
-            if str(prompt_id) not in _ns_notes["attempted_prompt_ids"]:
-                _ns_notes["attempted_prompt_ids"].append(str(prompt_id))
-            _write_session_notes(cur, str(session_id), _ns_notes)
-
-            # Adaptive intervention block for no-speech attempt 3.
-            # Mirrors the normal-scoring adaptive block; the initial "drop" in
-            # _upsert_patient_task_progress above is already applied, so the
-            # non-beginner branch here only increments interventions (no second upsert).
-            if attempt_number >= 3:
-                _ns_task_name = _get_task_name(cur, str(task_id)) if task_id else "Unknown Task"
-                cur.execute("SELECT level_name FROM task_level WHERE level_id = %s", (level_id,))
-                _ns_lvl_row = cur.fetchone()
-                _ns_level_name = _ns_lvl_row[0] if _ns_lvl_row else None
-
-                if _ns_notes.get("escalated"):
-                    adaptive_decision = "escalated"
-                elif _ns_notes["adaptive_interventions"] >= 2:
-                    _ns_notes["escalated"] = True
-                    _ns_notes["escalation_level"] = _ns_level_name
-                    _write_session_notes(cur, str(session_id), _ns_notes)
-                    adaptive_decision = "escalated"
-                    if assigned_therapist_id:
-                        cur.execute(
-                            "INSERT INTO therapist_notification"
-                            " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
-                            " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
-                            (
-                                str(uuid.uuid4()),
-                                assigned_therapist_id,
-                                "task_escalated",
-                                str(patient_id),
-                                str(attempt_id),
-                                f"Task '{_ns_task_name}' escalated after 2 failed interventions"
-                                f" (no speech detected). New plan will be generated at a lower level.",
-                            ),
-                        )
-                        regenerate_plan_after_escalation.delay(
-                            str(patient_id), str(assigned_therapist_id), _ns_level_name or "beginner"
-                        )
-                else:
-                    _ns_force_escalate = False
-                    if _ns_level_name == "beginner":
-                        cur.execute(
-                            "SELECT p.prompt_id FROM prompt p"
-                            " JOIN task_level tl ON tl.level_id = p.level_id"
-                            " WHERE tl.task_id = %s AND tl.level_name = 'beginner'",
-                            (str(task_id),),
-                        )
-                        _ns_all_beginner_ids = [str(r[0]) for r in cur.fetchall()]
-                        _ns_candidates = [pid for pid in _ns_all_beginner_ids
-                                          if pid not in _ns_notes["attempted_prompt_ids"]]
-                        if _ns_candidates:
-                            adaptive_decision = "alternate_prompt"
-                        else:
-                            _ns_force_escalate = True
-                    # Non-beginner: drop already applied above; just track the intervention.
-
-                    if _ns_force_escalate:
-                        _ns_notes["adaptive_interventions"] = 2
-                        _ns_notes["escalated"] = True
-                        _ns_notes["escalation_level"] = _ns_level_name
-                        _write_session_notes(cur, str(session_id), _ns_notes)
-                        adaptive_decision = "escalated"
-                        if assigned_therapist_id:
-                            cur.execute(
-                                "INSERT INTO therapist_notification"
-                                " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
-                                " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
-                                (
-                                    str(uuid.uuid4()),
-                                    assigned_therapist_id,
-                                    "task_escalated",
-                                    str(patient_id),
-                                    str(attempt_id),
-                                    f"Task '{_ns_task_name}' escalated — no beginner candidates remain"
-                                    f" (no speech detected). New plan will be generated.",
-                                ),
-                            )
-                            regenerate_plan_after_escalation.delay(
-                                str(patient_id), str(assigned_therapist_id), _ns_level_name or "beginner"
-                            )
-                    else:
-                        _ns_notes["adaptive_interventions"] += 1
-                        _write_session_notes(cur, str(session_id), _ns_notes)
-                        if assigned_therapist_id:
-                            cur.execute(
-                                "INSERT INTO therapist_notification"
-                                " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
-                                " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
-                                (
-                                    str(uuid.uuid4()),
-                                    assigned_therapist_id,
-                                    "task_attempt_failed",
-                                    str(patient_id),
-                                    str(attempt_id),
-                                    f"Patient failed '{_ns_task_name}' (no speech, attempt 3)."
-                                    f" Adaptive intervention {_ns_notes['adaptive_interventions']} of 2: {adaptive_decision}.",
-                                ),
-                            )
 
             _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
             if assigned_therapist_id:
@@ -895,6 +1075,7 @@ def analyze_attempt(self, attempt_id):
             emotion_score=emotion_score, pa_available=pa_available,
             wa_available=wa_available, weights=weights,
         )
+        scores = _apply_emotion_priority_override(scores, dominant_emotion, emotion_score)
 
         # Override PA cap threshold with defect-specific threshold if available
         if pa_available and defect_pa_min is not None and pa is not None and pa < defect_pa_min:
@@ -948,117 +1129,35 @@ def analyze_attempt(self, attempt_id):
             " WHERE attempt_id=%s",
             (pass_fail, transcript, attempt_id),
         )
+        notes, queue_active, queue_override = _apply_session_queue_result(
+            cur,
+            str(session_id),
+            str(task_id) if task_id else "",
+            str(prompt_id),
+            pass_fail,
+            attempt_number,
+            level_id,
+            fail_reason,
+            final_score,
+            str(patient_id),
+            str(assigned_therapist_id) if assigned_therapist_id else None,
+            str(attempt_id),
+        )
+        if queue_override:
+            adaptive_decision = queue_override.get("adaptive_decision", adaptive_decision)
+            performance_level = queue_override.get("performance_level", performance_level)
+            cur.execute(
+                "UPDATE attempt_score_detail SET adaptive_decision=%s, performance_level=%s WHERE attempt_id=%s",
+                (adaptive_decision, performance_level, attempt_id),
+            )
+        progress_adaptive_decision = adaptive_decision
+        if queue_active and pass_fail == "pass":
+            progress_adaptive_decision = "stay"
         _upsert_patient_task_progress(
             cur, str(patient_id), task_id,
-            level_id, adaptive_decision, final_score, pass_fail,
+            level_id, progress_adaptive_decision, final_score, pass_fail,
         )
         _mark_prompt_terminal(cur, str(session_id), prompt_id, pass_fail, attempt_number)
-
-        # Subtask 3.5 — track attempted_prompt_ids on every scored attempt
-        notes = _read_session_notes(cur, str(session_id))
-        if str(prompt_id) not in notes["attempted_prompt_ids"]:
-            notes["attempted_prompt_ids"].append(str(prompt_id))
-        _write_session_notes(cur, str(session_id), notes)
-
-        # Subtasks 3.6/3.7 — adaptive intervention block
-        if attempt_number == 3 and pass_fail == "fail":
-            task_name = _get_task_name(cur, str(task_id)) if task_id else "Unknown Task"
-            cur.execute("SELECT level_name FROM task_level WHERE level_id = %s", (level_id,))
-            _lvl_row = cur.fetchone()
-            current_level_name = _lvl_row[0] if _lvl_row else None
-
-            if notes["escalated"]:
-                # Celery retry guard — escalation already committed, republish WS
-                adaptive_decision = "escalated"
-            elif notes["adaptive_interventions"] >= 2:
-                # Force escalation
-                notes["escalated"] = True
-                notes["escalation_level"] = current_level_name
-                _write_session_notes(cur, str(session_id), notes)
-                if assigned_therapist_id:
-                    cur.execute(
-                        "INSERT INTO therapist_notification"
-                        " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
-                        " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
-                        (
-                            str(uuid.uuid4()),
-                            assigned_therapist_id,
-                            "task_escalated",
-                            str(patient_id),
-                            str(attempt_id),
-                            f"Task '{task_name}' has been escalated after 2 failed interventions. "
-                            f"Final score: {final_score:.1f}. New plan will be generated at a lower level.",
-                        ),
-                    )
-                adaptive_decision = "escalated"
-                if assigned_therapist_id:
-                    regenerate_plan_after_escalation.delay(
-                        str(patient_id), str(assigned_therapist_id), current_level_name or "beginner"
-                    )
-            else:
-                force_escalate = False
-                if current_level_name == "beginner":
-                    cur.execute(
-                        "SELECT p.prompt_id FROM prompt p"
-                        " JOIN task_level tl ON tl.level_id = p.level_id"
-                        " WHERE tl.task_id = %s AND tl.level_name = 'beginner'",
-                        (str(task_id),),
-                    )
-                    all_beginner_ids = [str(r[0]) for r in cur.fetchall()]
-                    candidates = [pid for pid in all_beginner_ids
-                                  if pid not in notes["attempted_prompt_ids"]]
-                    if candidates:
-                        adaptive_decision = "alternate_prompt"
-                    else:
-                        force_escalate = True
-                else:
-                    # Drop already applied by the unconditional _upsert_patient_task_progress
-                    # above (line ~749). A second call here would double-drop the level.
-                    adaptive_decision = "drop"
-
-                if force_escalate:
-                    notes["adaptive_interventions"] = 2
-                    notes["escalated"] = True
-                    notes["escalation_level"] = current_level_name
-                    _write_session_notes(cur, str(session_id), notes)
-                    if assigned_therapist_id:
-                        cur.execute(
-                            "INSERT INTO therapist_notification"
-                            " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
-                            " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
-                            (
-                                str(uuid.uuid4()),
-                                assigned_therapist_id,
-                                "task_escalated",
-                                str(patient_id),
-                                str(attempt_id),
-                                f"Task '{task_name}' has been escalated after 2 failed interventions. "
-                                f"Final score: {final_score:.1f}. New plan will be generated at a lower level.",
-                            ),
-                        )
-                    adaptive_decision = "escalated"
-                    if assigned_therapist_id:
-                        regenerate_plan_after_escalation.delay(
-                            str(patient_id), str(assigned_therapist_id), current_level_name or "beginner"
-                        )
-                else:
-                    notes["adaptive_interventions"] += 1
-                    _write_session_notes(cur, str(session_id), notes)
-                    if assigned_therapist_id:
-                        cur.execute(
-                            "INSERT INTO therapist_notification"
-                            " (notification_id, therapist_id, type, patient_id, attempt_id, message, is_read, created_at)"
-                            " VALUES (%s, %s, %s, %s, %s, %s, false, NOW())",
-                            (
-                                str(uuid.uuid4()),
-                                assigned_therapist_id,
-                                "task_attempt_failed",
-                                str(patient_id),
-                                str(attempt_id),
-                                f"Patient failed '{task_name}' (attempt 3, score {final_score:.1f}). "
-                                f"Adaptive intervention {notes['adaptive_interventions']} of 2 applied: {adaptive_decision}.",
-                            ),
-                        )
 
         _upsert_session_emotion_summary(cur, str(session_id), str(patient_id))
         if review_recommended and assigned_therapist_id:

@@ -14,6 +14,12 @@ def default_session_notes(assignment_id=None, task_id=None) -> dict:
         "attempted_prompt_ids": [],
         "escalated": False,
         "escalation_level": None,
+        "queue_items": [],
+        "queue_initialized": False,
+        "current_queue_level": None,
+        "adaptation_history": [],
+        "adaptation_report": None,
+        "locked_for_review": False,
     }
 
 
@@ -33,7 +39,13 @@ def parse_session_notes(raw: str | None, assignment_id=None, task_id=None) -> di
         return defaults
     merged = {**defaults, **parsed}
     # normalize list fields in case stored value is None
-    for key in ("completed_prompt_ids", "passed_prompt_ids", "attempted_prompt_ids"):
+    for key in (
+        "completed_prompt_ids",
+        "passed_prompt_ids",
+        "attempted_prompt_ids",
+        "queue_items",
+        "adaptation_history",
+    ):
         if not isinstance(merged.get(key), list):
             merged[key] = []
     return merged
@@ -41,7 +53,13 @@ def parse_session_notes(raw: str | None, assignment_id=None, task_id=None) -> di
 
 def serialize_session_notes(notes: dict) -> str:
     """JSON dump with normalized list fields."""
-    for key in ("completed_prompt_ids", "passed_prompt_ids", "attempted_prompt_ids"):
+    for key in (
+        "completed_prompt_ids",
+        "passed_prompt_ids",
+        "attempted_prompt_ids",
+        "queue_items",
+        "adaptation_history",
+    ):
         if not isinstance(notes.get(key), list):
             notes[key] = []
     return json.dumps(notes)

@@ -12,8 +12,8 @@ import Link from "next/link";
 export default function TasksPage() {
   const results = useQueries({
     queries: [
-      { queryKey: ["patient", "tasks"], queryFn: () => api.get<TodayTasksResponse>("/patient/tasks") },
-      { queryKey: ["patient", "home"], queryFn: () => api.get<HomeSummary>("/patient/home").catch(() => null) },
+      { queryKey: ["patient", "tasks"], queryFn: () => api.get<TodayTasksResponse>("/patient/tasks"), refetchOnWindowFocus: true, refetchInterval: 15000 },
+      { queryKey: ["patient", "home"], queryFn: () => api.get<HomeSummary>("/patient/home").catch(() => null), refetchOnWindowFocus: true, refetchInterval: 15000 },
     ],
   });
 

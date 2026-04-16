@@ -20,10 +20,32 @@ const MAX_ATTEMPTS = 3;
 const UPLOAD_TIMEOUT_MS = 30_000;
 const ANALYSIS_TIMEOUT_MS = 90_000;
 
+function isDistressScore(score: AttemptScore | null): boolean {
+  if (!score) return false;
+  const emotion = (score.dominant_emotion ?? "").toLowerCase();
+  const emotionScore = typeof score.emotion_score === "number" ? score.emotion_score : null;
+  if (emotionScore === null) return false;
+  if ((emotion === "angry" || emotion === "fearful") && emotionScore <= 40) return true;
+  if (emotion === "sad" && emotionScore <= 55) return true;
+  return false;
+}
+
+function getSupportMessage(score: AttemptScore | null): string {
+  const emotion = (score?.dominant_emotion ?? "").toLowerCase();
+  if (emotion === "angry" || emotion === "fearful") {
+    return "You did the speech work. Let's slow down for a moment before continuing.";
+  }
+  if (emotion === "sad") {
+    return "You are still making progress. Let's keep the next step gentle.";
+  }
+  return "Let's take the next step calmly.";
+}
+
 export default function ExercisePage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();
   const router = useRouter();
   const userId = useAuthStore((state) => state.userId);
+  const bootstrapped = useAuthStore((state) => state.bootstrapped);
 
   const [phase, setPhase] = useState<SessionPhase>("instruction");
   const [score, setScore] = useState<AttemptScore | null>(null);
@@ -54,7 +76,7 @@ export default function ExercisePage() {
   const sessionId = exerciseState?.session_id ?? null;
 
   useEffect(() => {
-    if (!userId) return;
+    if (!bootstrapped || !userId) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       if (cancelled) return;
@@ -78,6 +100,7 @@ export default function ExercisePage() {
           setScore(data);
           setPhase("scored");
         },
+        undefined,
         (attempt) => {
           setWsReconnecting(true);
           toast.info(`Reconnecting to score delivery... (attempt ${attempt}/${5})`);
@@ -96,7 +119,7 @@ export default function ExercisePage() {
       wsRef.current = null;
       clearAttemptTracking();
     };
-  }, [userId]);
+  }, [bootstrapped, userId]);
 
   useEffect(() => {
     if (!exerciseState) return;
@@ -299,7 +322,11 @@ export default function ExercisePage() {
   const isWarmup = currentPrompt.prompt_type === "warmup";
   const terminalFailure = score?.pass_fail === "fail" && (score.attempt_number ?? attemptNumber ?? 0) >= MAX_ATTEMPTS;
   const canRetry = score?.pass_fail === "fail" && !terminalFailure;
-  const currentProgress = exerciseState.completed_prompts + 1;
+  const needsSupportPause = isDistressScore(score);
+  const currentProgress = Math.min(
+    exerciseState.completed_prompts + (exerciseState.current_prompt ? 1 : 0),
+    exerciseState.total_prompts
+  );
 
   return (
     <div className="space-y-6 animate-fade-up max-w-2xl">
@@ -391,6 +418,36 @@ export default function ExercisePage() {
       {phase === "scored" && score && (
         <>
           <ScoreDisplay score={score} />
+          {needsSupportPause && (
+            <NeoCard accent="accent" className="space-y-3">
+              <p className="font-black uppercase text-sm">Take A Moment</p>
+              <p className="text-sm font-medium text-neo-black/80">{getSupportMessage(score)}</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <NeoButton
+                  className="w-full"
+                  onClick={() => {
+                    if (canRetry) {
+                      retryExercise();
+                      return;
+                    }
+                    void finishOrAdvance();
+                  }}
+                >
+                  {canRetry ? "Continue Task" : "Continue"}
+                </NeoButton>
+                <NeoButton
+                  className="w-full"
+                  variant="secondary"
+                  onClick={() => {
+                    toast.info("Take a short break. You can come back when you feel ready.");
+                    router.push("/patient/tasks");
+                  }}
+                >
+                  Take A Break
+                </NeoButton>
+              </div>
+            </NeoCard>
+          )}
           {noSpeech && canRetry && (
             <NeoCard accent="accent" className="space-y-2">
               <p className="font-black uppercase text-sm">Retry Available</p>
@@ -407,15 +464,15 @@ export default function ExercisePage() {
               </p>
             </NeoCard>
           )}
-          {canRetry ? (
+          {!needsSupportPause && canRetry ? (
             <NeoButton className="w-full" onClick={retryExercise}>
               Retry Exercise
             </NeoButton>
-          ) : (
+          ) : !needsSupportPause ? (
             <NeoButton className="w-full" onClick={() => void finishOrAdvance()}>
-              {score.pass_fail === "pass" ? "Next Exercise →" : "Continue →"}
+              {score.pass_fail === "pass" ? "Next Exercise" : "Continue"}
             </NeoButton>
-          )}
+          ) : null}
         </>
       )}
     </div>

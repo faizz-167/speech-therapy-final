@@ -21,6 +21,7 @@ function formatRelativeTime(dateStr: string): string {
 function typeIcon(type: string): string {
   if (type === "therapist_approved") return "✅";
   if (type === "plan_approved") return "🗂️";
+  if (type === "plan_updated") return "📝";
   if (type === "daily_task_reminder") return "📅";
   if (type === "pending_tasks") return "⏳";
   return "🔔";
@@ -35,6 +36,7 @@ function navTarget(notification: PatientNotification): string {
   }
   if (
     notification.notification_type === "plan_approved" ||
+    notification.notification_type === "plan_updated" ||
     notification.notification_type === "daily_task_reminder" ||
     notification.notification_type === "pending_tasks"
   ) {

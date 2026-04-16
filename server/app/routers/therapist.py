@@ -2,18 +2,23 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 from typing import Annotated
 
 from app.database import get_db
 from app.auth import require_therapist
 from app.models.users import Therapist, Patient, PatientStatus
-from app.models.content import Defect
+from app.models.content import Defect, Task
 from app.models.operations import PatientNotification, TherapistNotification
 from app.models.baseline import PatientBaselineResult
-from app.models.plan import TherapyPlan
+from app.models.plan import TherapyPlan, PlanRevisionHistory
+from app.models.scoring import Session
+from app.utils.session_notes import parse_session_notes
 from app.schemas.therapist import (
     DashboardResponse, PatientListItem, ApprovePatientRequest,
     TherapistProfileResponse, DefectItem, NotificationOut,
+    AdaptationActivityOut, AdaptationEventOut, AdaptationStepOut,
+    RegeneratedPlanOut, RegeneratedAssignmentOut,
 )
 
 router = APIRouter()
@@ -307,3 +312,160 @@ async def list_defects(
         DefectItem(defect_id=d.defect_id, code=d.code, name=d.name, category=d.category)
         for d in defects
     ]
+
+
+@router.get("/patients/{patient_id}/adaptation-activity", response_model=AdaptationActivityOut)
+async def get_adaptation_activity(
+    patient_id: str,
+    therapist: Annotated[Therapist, Depends(require_therapist)],
+    db: AsyncSession = Depends(get_db),
+):
+    # Verify patient belongs to this therapist
+    patient_result = await db.execute(
+        select(Patient).where(
+            Patient.patient_id == patient_id,
+            Patient.assigned_therapist_id == therapist.therapist_id,
+        )
+    )
+    if not patient_result.scalar_one_or_none():
+        raise HTTPException(404, "Patient not found")
+
+    # Fetch all sessions for the patient
+    sessions_result = await db.execute(
+        select(Session)
+        .where(Session.patient_id == patient_id)
+        .order_by(Session.session_date.desc())
+    )
+    sessions = sessions_result.scalars().all()
+
+    # Filter to sessions that have at least one adaptation.
+    # Use parse_session_notes so all keys are guaranteed present with defaults,
+    # even for sessions recorded before the escalation fields were introduced.
+    adaptation_data: list[tuple[Session, dict]] = []
+    session_task_ids: set[str] = set()
+    for session in sessions:
+        notes = parse_session_notes(session.session_notes)
+        if int(notes.get("adaptive_interventions") or 0) < 1:
+            continue
+        task_id = notes.get("task_id")
+        if task_id:
+            session_task_ids.add(str(task_id))
+        adaptation_data.append((session, notes))
+
+    # Fetch auto-regenerated plans for this patient (identified via revision history)
+    regen_plans_result = await db.execute(
+        select(TherapyPlan)
+        .join(PlanRevisionHistory, TherapyPlan.plan_id == PlanRevisionHistory.plan_id)
+        .where(
+            TherapyPlan.patient_id == patient_id,
+            PlanRevisionHistory.action == "auto_regenerated_after_escalation",
+        )
+        .options(
+            selectinload(TherapyPlan.assignments),
+            selectinload(TherapyPlan.revision_history),
+        )
+        .order_by(TherapyPlan.created_at.desc())
+    )
+    regen_plans = regen_plans_result.scalars().unique().all()
+
+    assignment_task_ids: set[str] = set()
+    for plan in regen_plans:
+        for assignment in plan.assignments:
+            assignment_task_ids.add(str(assignment.task_id))
+
+    # Batch-fetch task names for all collected task IDs
+    all_task_ids = session_task_ids | assignment_task_ids
+    task_names: dict[str, str] = {}
+    if all_task_ids:
+        tasks_result = await db.execute(
+            select(Task.task_id, Task.name).where(Task.task_id.in_(all_task_ids))
+        )
+        task_names = {row[0]: row[1] for row in tasks_result.all()}
+
+    # Build RegeneratedPlanOut objects sorted chronologically (ASC) for pairing
+    def _build_regen_plan_out(plan) -> RegeneratedPlanOut:
+        regen_note: str | None = None
+        for rev in plan.revision_history:
+            if rev.action == "auto_regenerated_after_escalation":
+                regen_note = rev.note
+                break
+        return RegeneratedPlanOut(
+            plan_id=str(plan.plan_id),
+            plan_name=plan.plan_name,
+            status=plan.status,
+            created_at=plan.created_at.isoformat(),
+            regeneration_note=regen_note,
+            assignments=[
+                RegeneratedAssignmentOut(
+                    assignment_id=str(a.assignment_id),
+                    task_id=str(a.task_id),
+                    task_name=task_names.get(str(a.task_id), "Unknown Task"),
+                    initial_level_name=a.initial_level_name,
+                    day_index=a.day_index,
+                )
+                for a in plan.assignments
+            ],
+        )
+
+    regen_plans_asc = sorted(regen_plans, key=lambda p: p.created_at)
+    regen_plans_out_asc = [_build_regen_plan_out(p) for p in regen_plans_asc]
+
+    # Pair each escalated session (chronological ASC) with the matching regen plan.
+    # A session is "escalated" when adaptive_interventions >= 2, regardless of whether
+    # the notes["escalated"] boolean was written (some older sessions may be missing it).
+    def _is_escalated(n: dict) -> bool:
+        return bool(n.get("escalated")) or int(n.get("adaptive_interventions") or 0) >= 2
+
+    escalated_asc = sorted(
+        [(s, n) for s, n in adaptation_data if _is_escalated(n)],
+        key=lambda x: x[0].session_date,
+    )
+    linked_plan_map: dict[str, RegeneratedPlanOut] = {}
+    for i, (esession, _) in enumerate(escalated_asc):
+        if i < len(regen_plans_out_asc):
+            linked_plan_map[str(esession.session_id)] = regen_plans_out_asc[i]
+
+    # Build adaptation event list (adaptation_data is already DESC by session_date)
+    adaptation_events: list[AdaptationEventOut] = []
+    for session, notes in adaptation_data:
+        adaptive_count = int(notes.get("adaptive_interventions") or 0)
+        is_escalated = _is_escalated(notes)
+
+        # Resolve task_id from multiple possible locations in notes
+        adaptation_report = notes.get("adaptation_report")
+        task_id = (
+            notes.get("task_id")
+            or (adaptation_report or {}).get("task_id")
+            or ""
+        )
+        task_name = task_names.get(str(task_id), "Unknown Task")
+        if isinstance(adaptation_report, dict) and adaptation_report.get("task_name"):
+            task_name = adaptation_report["task_name"]
+
+        adaptation_events.append(
+            AdaptationEventOut(
+                session_id=str(session.session_id),
+                session_date=session.session_date.isoformat(),
+                task_id=str(task_id),
+                task_name=task_name,
+                adaptation_count=adaptive_count,
+                escalated=is_escalated,
+                adaptation_history=[
+                    AdaptationStepOut(
+                        from_level=step.get("from_level", ""),
+                        to_level=step.get("to_level", ""),
+                        attempts_used=int(step.get("attempts_used") or 0),
+                        reason=step.get("reason", ""),
+                        final_score=float(step.get("final_score") or 0),
+                    )
+                    for step in (notes.get("adaptation_history") or [])
+                ],
+                adaptation_report=adaptation_report if isinstance(adaptation_report, dict) else None,
+                linked_plan=linked_plan_map.get(str(session.session_id)),
+            )
+        )
+
+    return AdaptationActivityOut(
+        adaptation_events=adaptation_events,
+        regenerated_plans=[_build_regen_plan_out(p) for p in regen_plans],
+    )

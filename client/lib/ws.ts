@@ -25,6 +25,7 @@ export interface ScoreReadyPayload extends AttemptScore {
 }
 
 type ScoreHandler = (data: ScoreReadyPayload) => void;
+type MessageHandler = (data: unknown) => void;
 type ReconnectHandler = (attempt: number) => void;
 type FallbackHandler = () => void;
 
@@ -44,6 +45,7 @@ export interface WebSocketHandle {
 export function createWebSocket(
   patientId: string,
   onScore: ScoreHandler,
+  onMessage?: MessageHandler,
   onReconnect?: ReconnectHandler,
   onFallback?: FallbackHandler
 ): WebSocketHandle | null {
@@ -54,6 +56,7 @@ export function createWebSocket(
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let stableConnectionTimer: ReturnType<typeof setTimeout> | null = null;
+  let connectTimer: ReturnType<typeof setTimeout> | null = null;
 
   function sendAuth(socket: WebSocket) {
     const token = getToken();
@@ -62,7 +65,7 @@ export function createWebSocket(
     }
   }
 
-  function connect() {
+  function openSocket() {
     try {
       ws = new WebSocket(`${WS_URL}/ws/${patientId}`);
 
@@ -79,6 +82,7 @@ export function createWebSocket(
 
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        onMessage?.(data);
         if (data.type === "score_ready") onScore(data as ScoreReadyPayload);
       };
 
@@ -108,11 +112,25 @@ export function createWebSocket(
     }
   }
 
+  function connect() {
+    if (intentionalClose || connectTimer !== null) return;
+    // Defer initial connection so React dev remounts can cancel cleanly before the browser opens the socket.
+    connectTimer = setTimeout(() => {
+      connectTimer = null;
+      if (intentionalClose) return;
+      openSocket();
+    }, 0);
+  }
+
   connect();
 
   return {
     disconnect() {
       intentionalClose = true;
+      if (connectTimer !== null) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
+      }
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;

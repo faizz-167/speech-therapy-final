@@ -1,13 +1,16 @@
 import uuid
 from typing import Annotated
+import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import String, cast, select
 from sqlalchemy.orm import selectinload
+import redis.asyncio as aioredis
 
 from app.database import get_db
 from app.auth import require_therapist
+from app.config import settings
 from app.models.users import Therapist, Patient
 from app.models.plan import TherapyPlan, PlanTaskAssignment, PlanRevisionHistory
 from app.models.content import Task, TaskDefectMapping, TaskLevel
@@ -19,6 +22,7 @@ from app.schemas.plans import (
 from app.services.plan_generator import generate_weekly_plan
 
 router = APIRouter()
+_PRIORITY_SHIFT_SENTINEL = 1000
 
 
 def _build_revision_summary(entry: PlanRevisionHistory) -> str | None:
@@ -39,6 +43,101 @@ def _build_revision_summary(entry: PlanRevisionHistory) -> str | None:
     if entry.action == "remove_task" and entry.old_value:
         return f"Removed task {entry.old_value.get('task_id')} from day {entry.old_value.get('day_index')}"
     return None
+
+
+async def _make_priority_slot(
+    db: AsyncSession,
+    plan_id: uuid.UUID,
+    day_index: int,
+    priority_order: int,
+    exclude_assignment_id: uuid.UUID | None = None,
+) -> None:
+    stmt = (
+        select(PlanTaskAssignment)
+        .where(
+            PlanTaskAssignment.plan_id == plan_id,
+            PlanTaskAssignment.day_index == day_index,
+            PlanTaskAssignment.priority_order >= priority_order,
+        )
+        .order_by(PlanTaskAssignment.priority_order.desc())
+    )
+    if exclude_assignment_id is not None:
+        stmt = stmt.where(PlanTaskAssignment.assignment_id != exclude_assignment_id)
+
+    result = await db.execute(stmt)
+    assignments = result.scalars().all()
+    if not assignments:
+        return
+
+    # Two-phase shift avoids transient uniqueness collisions on
+    # (plan_id, day_index, priority_order) during flush.
+    for assignment in assignments:
+        assignment.priority_order = int(assignment.priority_order or 0) + _PRIORITY_SHIFT_SENTINEL
+    await db.flush()
+
+    for assignment in assignments:
+        assignment.priority_order = int(assignment.priority_order or 0) - _PRIORITY_SHIFT_SENTINEL + 1
+    await db.flush()
+
+
+async def _compact_day_priorities(
+    db: AsyncSession,
+    plan_id: uuid.UUID,
+    day_index: int,
+) -> None:
+    result = await db.execute(
+        select(PlanTaskAssignment)
+        .where(
+            PlanTaskAssignment.plan_id == plan_id,
+            PlanTaskAssignment.day_index == day_index,
+        )
+        .order_by(PlanTaskAssignment.priority_order.asc(), PlanTaskAssignment.assignment_id.asc())
+    )
+    assignments = result.scalars().all()
+
+    # Two-phase rewrite avoids transient uniqueness collisions while
+    # compacting priorities such as 0,2 -> 0,1.
+    for assignment in assignments:
+        assignment.priority_order = int(assignment.priority_order or 0) + _PRIORITY_SHIFT_SENTINEL
+    await db.flush()
+
+    for index, assignment in enumerate(assignments):
+        assignment.priority_order = index
+    await db.flush()
+
+
+async def _notify_patient_plan_change(
+    db: AsyncSession,
+    plan: TherapyPlan,
+    notification_type: str,
+    message: str,
+    *,
+    assignment_id: uuid.UUID | None = None,
+    action: str | None = None,
+) -> None:
+    db.add(
+        PatientNotification(
+            patient_id=plan.patient_id,
+            plan_id=plan.plan_id,
+            assignment_id=assignment_id,
+            type=notification_type,
+            message=message,
+        )
+    )
+    await db.flush()
+
+    payload = {
+        "type": "plan_updated",
+        "plan_id": str(plan.plan_id),
+        "assignment_id": str(assignment_id) if assignment_id else None,
+        "action": action or notification_type,
+        "message": message,
+    }
+    r = aioredis.from_url(settings.redis_url)
+    try:
+        await r.publish(f"ws:patient:{plan.patient_id}", json.dumps(payload))
+    finally:
+        await r.aclose()
 
 
 async def _plan_to_out(plan: TherapyPlan, db: AsyncSession) -> PlanOut:
@@ -190,13 +289,15 @@ async def add_task(
     if not task:
         raise HTTPException(404, "Task not found")
     default_level_name = await _resolve_default_task_level_name(body.task_id, db)
+    target_priority = max(0, int(body.priority_order))
+    await _make_priority_slot(db, plan.plan_id, body.day_index, target_priority)
     assignment = PlanTaskAssignment(
         assignment_id=uuid.uuid4(),
         plan_id=uuid.UUID(plan_id),
         task_id=body.task_id,
         therapist_id=therapist.therapist_id,
         day_index=body.day_index,
-        priority_order=body.priority_order,
+        priority_order=target_priority,
         status="pending",
         initial_level_name=default_level_name,
     )
@@ -210,6 +311,15 @@ async def add_task(
         new_value={"task_id": str(assignment.task_id), "day_index": assignment.day_index},
     )
     db.add(revision)
+    if plan.status == "approved":
+        await _notify_patient_plan_change(
+            db,
+            plan,
+            "plan_updated",
+            f"Your therapist added '{task.name}' to your plan for day {assignment.day_index + 1}.",
+            assignment_id=assignment.assignment_id,
+            action="add_task",
+        )
     await db.commit()
     return AssignmentOut(
         assignment_id=str(assignment.assignment_id),
@@ -249,7 +359,17 @@ async def update_assignment(
     assignment = result.scalar_one_or_none()
     if not assignment:
         raise HTTPException(404, "Assignment not found")
+    original_day_index = assignment.day_index
+    original_priority = assignment.priority_order
+    original_level_name = assignment.initial_level_name
     if body.day_index is not None:
+        await _make_priority_slot(
+            db,
+            plan.plan_id,
+            body.day_index,
+            int(assignment.priority_order or 0),
+            exclude_assignment_id=assignment.assignment_id,
+        )
         assignment.day_index = body.day_index
     if body.status is not None:
         assignment.status = body.status
@@ -262,6 +382,8 @@ async def update_assignment(
         revision_old_value = {"initial_level_name": assignment.initial_level_name}
         assignment.initial_level_name = validated_level_name
         revision_new_value = {"initial_level_name": assignment.initial_level_name}
+    elif body.day_index is not None:
+        revision_old_value = {"day_index": original_day_index, "priority_order": original_priority}
     await db.commit()
     revision = PlanRevisionHistory(
         plan_id=plan.plan_id,
@@ -272,8 +394,33 @@ async def update_assignment(
         new_value=revision_new_value,
     )
     db.add(revision)
-    await db.commit()
     task = await db.get(Task, assignment.task_id)
+    if plan.status == "approved":
+        if revision_action == "update_level":
+            await _notify_patient_plan_change(
+                db,
+                plan,
+                "plan_updated",
+                (
+                    f"Your therapist updated '{task.name if task else assignment.task_id}' "
+                    f"from {original_level_name or 'beginner'} to {assignment.initial_level_name or 'beginner'}."
+                ),
+                assignment_id=assignment.assignment_id,
+                action="update_level",
+            )
+        elif body.day_index is not None:
+            await _notify_patient_plan_change(
+                db,
+                plan,
+                "plan_updated",
+                (
+                    f"Your therapist rescheduled '{task.name if task else assignment.task_id}' "
+                    f"from day {int(original_day_index or 0) + 1} to day {int(assignment.day_index or 0) + 1}."
+                ),
+                assignment_id=assignment.assignment_id,
+                action="reorder",
+            )
+    await db.commit()
     return AssignmentOut(
         assignment_id=str(assignment.assignment_id),
         task_id=assignment.task_id,
@@ -311,9 +458,34 @@ async def delete_assignment(
     assignment = result.scalar_one_or_none()
     if not assignment:
         raise HTTPException(404, "Assignment not found")
-    old_val = {"task_id": str(assignment.task_id), "day_index": assignment.day_index}
+    old_day_index = assignment.day_index
+    task = await db.get(Task, assignment.task_id)
+    old_val = {
+        "task_id": str(assignment.task_id),
+        "day_index": assignment.day_index,
+        "priority_order": assignment.priority_order,
+    }
+    history_result = await db.execute(
+        select(PlanRevisionHistory).where(
+            PlanRevisionHistory.assignment_id == assignment.assignment_id,
+        )
+    )
+    for revision_entry in history_result.scalars().all():
+        revision_entry.assignment_id = None
+
+    patient_notification_result = await db.execute(
+        select(PatientNotification).where(
+            PatientNotification.assignment_id == assignment.assignment_id,
+        )
+    )
+    for notification in patient_notification_result.scalars().all():
+        notification.assignment_id = None
+
     await db.delete(assignment)
-    await db.commit()
+    await db.flush()
+    if old_day_index is not None:
+        await _compact_day_priorities(db, plan.plan_id, old_day_index)
+
     revision = PlanRevisionHistory(
         plan_id=plan.plan_id,
         therapist_id=therapist.therapist_id,
@@ -321,6 +493,14 @@ async def delete_assignment(
         old_value=old_val,
     )
     db.add(revision)
+    if plan.status == "approved":
+        await _notify_patient_plan_change(
+            db,
+            plan,
+            "plan_updated",
+            f"Your therapist removed '{task.name if task else assignment.task_id}' from your plan.",
+            action="remove_task",
+        )
     await db.commit()
     return {"message": "Deleted"}
 
@@ -355,6 +535,23 @@ async def approve_plan(
         type="plan_approved",
         message=f"Your therapist approved the plan '{plan.plan_name}'. Today's tasks are ready.",
     ))
+    await db.flush()
+    r = aioredis.from_url(settings.redis_url)
+    try:
+        await r.publish(
+            f"ws:patient:{plan.patient_id}",
+            json.dumps(
+                {
+                    "type": "plan_updated",
+                    "plan_id": str(plan.plan_id),
+                    "assignment_id": None,
+                    "action": "approve",
+                    "message": f"Your therapist approved the plan '{plan.plan_name}'. Today's tasks are ready.",
+                }
+            ),
+        )
+    finally:
+        await r.aclose()
     await db.commit()
     return {"message": "Plan approved"}
 

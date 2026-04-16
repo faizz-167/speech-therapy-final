@@ -1,4 +1,4 @@
-import { NeoCard } from "@/components/ui/NeoCard";
+﻿import { NeoCard } from "@/components/ui/NeoCard";
 import type { AttemptScore } from "@/types";
 
 function formatEmotion(value: string | null | undefined): string {
@@ -6,13 +6,44 @@ function formatEmotion(value: string | null | undefined): string {
   return value.replace(/_/g, " ");
 }
 
+function isDistressEmotion(score: AttemptScore): boolean {
+  const emotion = (score.dominant_emotion ?? "").toLowerCase();
+  const emotionScore = typeof score.emotion_score === "number" ? score.emotion_score : null;
+  if (emotionScore === null) return false;
+  if ((emotion === "angry" || emotion === "fearful") && emotionScore <= 40) return true;
+  if (emotion === "sad" && emotionScore <= 55) return true;
+  return false;
+}
+
+function getHeadline(score: AttemptScore): string {
+  const emotion = (score.dominant_emotion ?? "").toLowerCase();
+  if (isDistressEmotion(score)) {
+    if (emotion === "angry" || emotion === "fearful") return "Let's pause and reset.";
+    if (emotion === "sad") return "Let's go gently from here.";
+  }
+  return score.pass_fail === "pass" ? "Good work." : "Not quite - keep going.";
+}
+
+function getDecisionLabel(score: AttemptScore): string {
+  if (!score.adaptive_decision) return "";
+  if (isDistressEmotion(score) && score.adaptive_decision === "stay") {
+    return "Stay And Reset";
+  }
+  return score.adaptive_decision === "advance"
+    ? "Level Up!"
+    : score.adaptive_decision === "drop"
+      ? "Adjusting to easier level"
+      : "Stay";
+}
+
 export function ScoreDisplay({ score }: { score: AttemptScore }) {
   const isPassed = score.pass_fail === "pass";
   const emotionLabel = formatEmotion(score.dominant_emotion);
+  const distress = isDistressEmotion(score);
 
   return (
     <div className="space-y-4 animate-pop-in">
-      <NeoCard accent={isPassed ? "secondary" : "accent"} className="text-center space-y-2">
+      <NeoCard accent={distress ? "accent" : isPassed ? "secondary" : "accent"} className="text-center space-y-2">
         {score.attempt_number ? (
           <div className="text-xs font-black uppercase text-neo-black/70">Attempt {score.attempt_number}</div>
         ) : null}
@@ -20,21 +51,15 @@ export function ScoreDisplay({ score }: { score: AttemptScore }) {
           {score.final_score?.toFixed(1)}
           <span className="text-xl">/100</span>
         </div>
-        <div className="font-black uppercase text-lg">
-          {isPassed ? "✓ Great job!" : "↻ Not quite — keep going!"}
-        </div>
+        <div className="font-black uppercase text-lg">{getHeadline(score)}</div>
         {score.adaptive_decision && (
           <div className="text-sm font-bold border-2 border-black inline-block px-3 py-1 uppercase">
-            {score.adaptive_decision === "advance"
-              ? "⬆ Level Up!"
-              : score.adaptive_decision === "drop"
-              ? "⬇ Adjusting to easier level"
-              : "→ Stay"}
+            {getDecisionLabel(score)}
           </div>
         )}
       </NeoCard>
 
-      <NeoCard accent="secondary" className="flex items-center justify-between gap-4">
+      <NeoCard accent={distress ? "accent" : "secondary"} className="flex items-center justify-between gap-4">
         <div>
           <p className="font-black uppercase text-xs text-neo-black/70">Detected Emotion</p>
           <p className="font-black text-2xl capitalize">{emotionLabel}</p>
@@ -68,7 +93,7 @@ export function ScoreDisplay({ score }: { score: AttemptScore }) {
                 ? label === "Speech Rate (WPM)"
                   ? value.toFixed(1)
                   : `${value.toFixed(1)}%`
-                : String(value ?? "—")}
+                : String(value ?? "--")}
             </p>
           </div>
         ))}

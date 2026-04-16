@@ -48,3 +48,45 @@ export interface Notification {
   patient_id: string | null;
   attempt_id: string | null;
 }
+
+export interface AdaptationStep {
+  from_level: string;
+  to_level: string;
+  attempts_used: number;
+  reason: string;
+  final_score: number;
+}
+
+export interface AdaptationEvent {
+  session_id: string;
+  session_date: string;
+  task_id: string;
+  task_name: string;
+  adaptation_count: number;
+  escalated: boolean;
+  adaptation_history: AdaptationStep[];
+  adaptation_report: Record<string, unknown> | null;
+  linked_plan: RegeneratedPlan | null;
+}
+
+export interface RegeneratedAssignment {
+  assignment_id: string;
+  task_id: string;
+  task_name: string;
+  initial_level_name: string | null;
+  day_index: number | null;
+}
+
+export interface RegeneratedPlan {
+  plan_id: string;
+  plan_name: string;
+  status: "draft" | "approved";
+  created_at: string;
+  regeneration_note: string | null;
+  assignments: RegeneratedAssignment[];
+}
+
+export interface AdaptationActivity {
+  adaptation_events: AdaptationEvent[];
+  regenerated_plans: RegeneratedPlan[];
+}

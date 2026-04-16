@@ -154,8 +154,9 @@ export default function PlanPage() {
              </div>
           </div>
 
-          <div className="bg-neo-primary/40 border-4 border-neo-black px-4 py-3 font-bold text-sm shadow-neo-sm -rotate-1 mb-8">
-             {plan.status === "approved" ? "This plan is approved and visible to the patient. You can still drag tasks between days, add new tasks, or remove tasks at any time." : "This plan is a draft. The patient cannot see it until you approve it."}
+          <div className="bg-neo-primary/40 border-4 border-neo-black px-4 py-3 font-bold text-sm shadow-neo-sm -rotate-1 mb-8 space-y-2">
+             <p>{plan.status === "approved" ? "You are editing the patient-visible approved plan. Changes here should appear on the patient side after refresh or live update." : "You are editing a draft plan. The patient will keep seeing their last approved plan until you approve this one."}</p>
+             <p className="text-neo-black/70">{plan.status === "approved" ? "Approved plan edits also trigger a patient notification." : "Approve this plan when you're ready for the patient dashboard to switch over."}</p>
           </div>
 
           <KanbanBoard

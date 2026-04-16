@@ -1,6 +1,6 @@
 from datetime import date
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional
+from typing import Optional, Any
 
 
 class DefectItem(BaseModel):
@@ -83,3 +83,45 @@ class TherapistProfileResponse(BaseModel):
     license_number: Optional[str]
     specialization: Optional[str]
     years_of_experience: Optional[int]
+
+
+class AdaptationStepOut(BaseModel):
+    from_level: str
+    to_level: str
+    attempts_used: int
+    reason: str
+    final_score: float
+
+
+class AdaptationEventOut(BaseModel):
+    session_id: str
+    session_date: str
+    task_id: str
+    task_name: str
+    adaptation_count: int
+    escalated: bool
+    adaptation_history: list[AdaptationStepOut]
+    adaptation_report: Optional[dict[str, Any]]
+    linked_plan: Optional["RegeneratedPlanOut"] = None
+
+
+class RegeneratedAssignmentOut(BaseModel):
+    assignment_id: str
+    task_id: str
+    task_name: str
+    initial_level_name: Optional[str]
+    day_index: Optional[int]
+
+
+class RegeneratedPlanOut(BaseModel):
+    plan_id: str
+    plan_name: str
+    status: str
+    created_at: str
+    regeneration_note: Optional[str]
+    assignments: list[RegeneratedAssignmentOut]
+
+
+class AdaptationActivityOut(BaseModel):
+    adaptation_events: list[AdaptationEventOut]
+    regenerated_plans: list[RegeneratedPlanOut]

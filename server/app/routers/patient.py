@@ -213,6 +213,56 @@ async def _load_level_prompts(
     return level, prompts_result.scalars().all()
 
 
+def _queue_item_to_prompt_out(item: dict, prompt: Prompt) -> PromptOut:
+    return PromptOut(
+        prompt_id=prompt.prompt_id,
+        prompt_type=prompt.prompt_type,
+        task_mode=prompt.task_mode,
+        instruction=prompt.instruction,
+        display_content=prompt.display_content,
+        target_response=prompt.target_response,
+        scenario_context=prompt.scenario_context,
+    )
+
+
+async def _ensure_session_queue(
+    patient: Patient,
+    assignment: PlanTaskAssignment,
+    task: Task,
+    session: Session,
+    notes: dict,
+    db: AsyncSession,
+) -> dict:
+    if notes.get("queue_initialized") and notes.get("queue_items"):
+        return notes
+
+    target_level_name = await _resolve_task_level_name(
+        patient, task.task_id, db,
+        initial_level_name=assignment.initial_level_name,
+    )
+    _level, prompts = await _load_level_prompts(task.task_id, target_level_name, db)
+
+    notes["queue_items"] = [
+        {
+            "queue_item_id": str(uuid.uuid4()),
+            "prompt_id": prompt.prompt_id,
+            "level_name": target_level_name,
+            "source_type": "planned",
+            "status": "pending",
+            "attempts_used": 0,
+            "adapted_from_level": None,
+            "reason_code": None,
+        }
+        for prompt in prompts
+    ]
+    notes["queue_initialized"] = True
+    notes["current_queue_level"] = target_level_name
+    session.session_notes = serialize_session_notes(notes)
+    await db.commit()
+    await db.refresh(session)
+    return parse_session_notes(session.session_notes)
+
+
 async def _get_assignment(
     assignment_id: str,
     patient: Patient,
@@ -305,6 +355,7 @@ async def _build_task_state(
 ) -> TaskExerciseStateOut:
     session = await _get_or_create_assignment_session(patient, plan, assignment, db)
     notes = parse_session_notes(session.session_notes)
+    notes = await _ensure_session_queue(patient, assignment, task, session, notes, db)
 
     if notes.get("escalated"):
         return TaskExerciseStateOut(
@@ -317,28 +368,30 @@ async def _build_task_state(
             escalated=True,
             escalation_message="Your therapist is reviewing this task. Please check back later.",
         )
-
-    target_level_name = await _resolve_task_level_name(
-        patient, task.task_id, db,
-        initial_level_name=assignment.initial_level_name,
+    queue_items = notes.get("queue_items") or []
+    terminal_statuses = {"passed", "failed_terminal", "skipped_due_to_lock"}
+    completed_count = sum(1 for item in queue_items if item.get("status") in terminal_statuses)
+    pending_item = next((item for item in queue_items if item.get("status") == "pending"), None)
+    current_level_name = str(
+        (pending_item or {}).get("level_name")
+        or notes.get("current_queue_level")
+        or assignment.initial_level_name
+        or "beginner"
     )
-    level, prompts = await _load_level_prompts(task.task_id, target_level_name, db)
-    current_level_name = level.level_name if level else "beginner"
 
-    completed_prompt_ids = set(notes.get("completed_prompt_ids") or [])
-    passed_prompt_ids = set(notes.get("passed_prompt_ids") or [])
-    remaining_prompts = [prompt for prompt in prompts if prompt.prompt_id not in completed_prompt_ids]
-    current_prompt = remaining_prompts[0] if remaining_prompts else None
-    prompt_ids = {prompt.prompt_id for prompt in prompts}
-    all_passed = bool(prompts) and prompt_ids.issubset(passed_prompt_ids)
+    current_prompt = None
+    if pending_item:
+        prompt = await db.get(Prompt, pending_item.get("prompt_id"))
+        if prompt:
+            current_prompt = _queue_item_to_prompt_out(pending_item, prompt)
 
     return TaskExerciseStateOut(
         session_id=str(session.session_id),
         current_level=current_level_name,
-        total_prompts=len(prompts),
-        completed_prompts=len(prompts) - len(remaining_prompts),
-        task_complete=current_prompt is None and all_passed,
-        current_prompt=_prompt_to_out(current_prompt) if current_prompt else None,
+        total_prompts=len(queue_items),
+        completed_prompts=completed_count,
+        task_complete=bool(queue_items) and pending_item is None,
+        current_prompt=current_prompt,
     )
 
 

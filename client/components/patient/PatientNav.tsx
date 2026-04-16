@@ -4,6 +4,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
+import { queryClient } from "@/lib/queryClient";
+import { createWebSocket, WebSocketHandle } from "@/lib/ws";
 import { NeoButton } from "@/components/ui/NeoButton";
 import { NotificationPanel } from "@/components/patient/NotificationPanel";
 import { cn } from "@/lib/utils";
@@ -19,10 +21,11 @@ const links = [
 export function PatientNav() {
   const pathname = usePathname();
   const router = useRouter();
-  const { fullName, clearAuth } = useAuthStore();
+  const { fullName, clearAuth, userId, bootstrapped } = useAuthStore();
   const [panelOpen, setPanelOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const bellRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocketHandle | null>(null);
 
   const fetchUnreadCount = useCallback(async () => {
     try {
@@ -38,6 +41,28 @@ export function PatientNav() {
     const interval = setInterval(fetchUnreadCount, 60_000);
     return () => clearInterval(interval);
   }, [fetchUnreadCount]);
+
+  useEffect(() => {
+    if (!bootstrapped || !userId) return;
+    wsRef.current?.disconnect();
+    wsRef.current = createWebSocket(
+      userId,
+      () => {},
+      (data) => {
+        if (!data || typeof data !== "object") return;
+        const event = data as { type?: string };
+        if (event.type !== "plan_updated") return;
+        void queryClient.invalidateQueries({ queryKey: ["patient", "home"] });
+        void queryClient.invalidateQueries({ queryKey: ["patient", "tasks"] });
+        void queryClient.invalidateQueries({ queryKey: ["exercise"] });
+        void fetchUnreadCount();
+      }
+    );
+    return () => {
+      wsRef.current?.disconnect();
+      wsRef.current = null;
+    };
+  }, [bootstrapped, fetchUnreadCount, userId]);
 
   useEffect(() => {
     if (!panelOpen) return;
