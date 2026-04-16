@@ -22,6 +22,7 @@ from app.schemas.patient import (
     TaskExerciseStateOut,
     TodayTasksResponse,
 )
+from app.utils.plan_lock import patient_has_pending_plan_review
 from app.utils.session_notes import default_session_notes, parse_session_notes, serialize_session_notes
 
 LEVEL_ADVANCE = {"beginner": "intermediate", "intermediate": "advanced", "advanced": "advanced"}
@@ -353,6 +354,18 @@ async def _build_task_state(
     task: Task,
     db: AsyncSession,
 ) -> TaskExerciseStateOut:
+    if await patient_has_pending_plan_review(patient.patient_id, db):
+        return TaskExerciseStateOut(
+            session_id="",
+            current_level="",
+            total_prompts=0,
+            completed_prompts=0,
+            task_complete=False,
+            current_prompt=None,
+            escalated=True,
+            escalation_message="Your therapist must approve a regenerated plan before you can continue.",
+        )
+
     session = await _get_or_create_assignment_session(patient, plan, assignment, db)
     notes = parse_session_notes(session.session_notes)
     notes = await _ensure_session_queue(patient, assignment, task, session, notes, db)
@@ -548,6 +561,9 @@ async def get_today_tasks(
     patient: Annotated[Patient, Depends(require_patient)],
     db: AsyncSession = Depends(get_db),
 ):
+    if await patient_has_pending_plan_review(patient.patient_id, db):
+        return TodayTasksResponse(assignments=[], any_escalated=True)
+
     plan = await _get_current_plan(patient.patient_id, db)
     if not plan:
         return TodayTasksResponse(assignments=[], any_escalated=False)
@@ -574,6 +590,8 @@ async def get_today_tasks(
         if progress and progress.current_level_id:
             level = await db.get(TaskLevel, progress.current_level_id)
             current_level = level.level_name if level else None
+        if current_level is None:
+            current_level = assignment.initial_level_name
         out.append(
             TaskAssignmentOut(
                 assignment_id=str(assignment.assignment_id),
@@ -587,21 +605,7 @@ async def get_today_tasks(
             )
         )
 
-    any_escalated = False
-    for assignment in today_assignments:
-        active_session = await _find_active_assignment_session(
-            patient.patient_id,
-            plan.plan_id,
-            str(assignment.assignment_id),
-            db,
-        )
-        if active_session:
-            notes = parse_session_notes(active_session.session_notes)
-            if notes.get("escalated"):
-                any_escalated = True
-                break
-
-    return TodayTasksResponse(assignments=out, any_escalated=any_escalated)
+    return TodayTasksResponse(assignments=out, any_escalated=False)
 
 
 @router.get("/tasks/{assignment_id}/prompts", response_model=list[PromptOut])

@@ -20,7 +20,7 @@ export interface Plan {
   plan_name: string;
   start_date: string | null;
   end_date: string | null;
-  status: "draft" | "approved";
+  status: "draft" | "approved" | "archived";
   goals: string | null;
   assignments: Assignment[];
 }

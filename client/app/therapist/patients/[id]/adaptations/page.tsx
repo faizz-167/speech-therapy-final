@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import {
   AdaptationActivity,
   AdaptationEvent,
@@ -61,9 +62,15 @@ function PlanStatusBadge({ status }: { status: PlanStatus }) {
 function RegeneratedPlanPanel({
   plan,
   patientId,
+  onApprove,
+  onReject,
+  busy,
 }: {
   plan: RegeneratedPlan;
   patientId: string;
+  onApprove: (planId: string) => void;
+  onReject: (planId: string) => void;
+  busy: boolean;
 }) {
   const [showTasks, setShowTasks] = useState(false);
   const isArchived = plan.status === "archived";
@@ -137,6 +144,17 @@ function RegeneratedPlanPanel({
           )}
         </div>
 
+        {isDraft && (
+          <div className="flex flex-wrap gap-2">
+            <NeoButton className="text-xs py-1.5" disabled={busy} onClick={() => onApprove(plan.plan_id)}>
+              Approve Plan
+            </NeoButton>
+            <NeoButton variant="secondary" className="text-xs py-1.5" disabled={busy} onClick={() => onReject(plan.plan_id)}>
+              Reject Plan
+            </NeoButton>
+          </div>
+        )}
+
         {showTasks && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {plan.assignments.map((a) => (
@@ -171,9 +189,15 @@ function RegeneratedPlanPanel({
 function AdaptationEventCard({
   event,
   patientId,
+  onApprove,
+  onReject,
+  busy,
 }: {
   event: AdaptationEvent;
   patientId: string;
+  onApprove: (planId: string) => void;
+  onReject: (planId: string) => void;
+  busy: boolean;
 }) {
   const [showLevelChanges, setShowLevelChanges] = useState(false);
   // Treat as escalated when count>=2 regardless of the boolean flag,
@@ -249,7 +273,13 @@ function AdaptationEventCard({
 
       {/* Inline regenerated plan panel — shown when escalated and plan is linked */}
       {isEscalated && event.linked_plan && (
-        <RegeneratedPlanPanel plan={event.linked_plan} patientId={patientId} />
+        <RegeneratedPlanPanel
+          plan={event.linked_plan}
+          patientId={patientId}
+          onApprove={onApprove}
+          onReject={onReject}
+          busy={busy}
+        />
       )}
 
       {/* Escalated but no linked plan found — warn therapist */}
@@ -268,6 +298,29 @@ function AdaptationEventCard({
 
 export default function AdaptationsPage() {
   const { id } = useParams<{ id: string }>();
+  const qc = useQueryClient();
+
+  const approveMutation = useMutation({
+    mutationFn: (planId: string) => api.post(`/plans/${planId}/approve`, {}),
+    onSuccess: async () => {
+      toast.success("Plan approved and pushed to the patient portal.");
+      await qc.invalidateQueries({ queryKey: ["therapist", "adaptation-activity", id] });
+      await qc.invalidateQueries({ queryKey: ["therapist", "plan", id] });
+    },
+    onError: (error: unknown) =>
+      toast.error(error instanceof Error ? error.message : "Approval failed"),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: (planId: string) => api.post(`/plans/${planId}/reject`, {}),
+    onSuccess: async () => {
+      toast.success("Plan rejected. Patient stays locked until another plan is approved.");
+      await qc.invalidateQueries({ queryKey: ["therapist", "adaptation-activity", id] });
+      await qc.invalidateQueries({ queryKey: ["therapist", "plan", id] });
+    },
+    onError: (error: unknown) =>
+      toast.error(error instanceof Error ? error.message : "Rejection failed"),
+  });
 
   const { data, isLoading, error } = useQuery<AdaptationActivity>({
     queryKey: ["therapist", "adaptation-activity", id],
@@ -315,7 +368,14 @@ export default function AdaptationsPage() {
       ) : (
         <div className="space-y-4">
           {data!.adaptation_events.map((event) => (
-            <AdaptationEventCard key={event.session_id} event={event} patientId={id} />
+            <AdaptationEventCard
+              key={event.session_id}
+              event={event}
+              patientId={id}
+              onApprove={(planId) => approveMutation.mutate(planId)}
+              onReject={(planId) => rejectMutation.mutate(planId)}
+              busy={approveMutation.isPending || rejectMutation.isPending}
+            />
           ))}
         </div>
       )}

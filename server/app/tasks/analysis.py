@@ -1027,6 +1027,19 @@ def analyze_attempt(self, attempt_id):
             if assigned_therapist_id:
                 _create_review_notification(cur, assigned_therapist_id, str(patient_id), str(attempt_id))
             conn.commit()
+            if adaptive_decision == "escalated" and assigned_therapist_id:
+                _esc_history = _ns_notes.get("adaptation_history") or []
+                _esc_level = (
+                    _esc_history[0].get("from_level")
+                    if _esc_history
+                    else (_ns_notes.get("escalation_level") or _get_level_name_from_level_id(cur, level_id))
+                )
+                if _esc_level:
+                    regenerate_plan_after_escalation.delay(
+                        str(patient_id),
+                        str(assigned_therapist_id),
+                        str(_esc_level),
+                    )
             r = redis.from_url(settings.redis_url)
             r.publish(
                 f"ws:patient:{patient_id}",
@@ -1163,6 +1176,19 @@ def analyze_attempt(self, attempt_id):
         if review_recommended and assigned_therapist_id:
             _create_review_notification(cur, assigned_therapist_id, str(patient_id), str(attempt_id))
         conn.commit()
+        if adaptive_decision == "escalated" and assigned_therapist_id:
+            _esc_history = notes.get("adaptation_history") or []
+            _esc_level = (
+                _esc_history[0].get("from_level")
+                if _esc_history
+                else (notes.get("escalation_level") or _get_level_name_from_level_id(cur, level_id))
+            )
+            if _esc_level:
+                regenerate_plan_after_escalation.delay(
+                    str(patient_id),
+                    str(assigned_therapist_id),
+                    str(_esc_level),
+                )
 
         r = redis.from_url(settings.redis_url)
         r.publish(

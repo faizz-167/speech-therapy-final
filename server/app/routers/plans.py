@@ -14,12 +14,15 @@ from app.config import settings
 from app.models.users import Therapist, Patient
 from app.models.plan import TherapyPlan, PlanTaskAssignment, PlanRevisionHistory
 from app.models.content import Task, TaskDefectMapping, TaskLevel
+from app.models.scoring import PatientTaskProgress, Session
 from app.models.operations import PatientNotification
 from app.schemas.plans import (
     GeneratePlanRequest, PlanOut, AssignmentOut, AddTaskRequest,
     UpdateAssignmentRequest, TaskForDefectOut, PlanRevisionEntryOut,
 )
 from app.services.plan_generator import generate_weekly_plan
+from app.utils.plan_lock import clear_patient_plan_review_lock
+from app.utils.session_notes import parse_session_notes, serialize_session_notes
 
 router = APIRouter()
 _PRIORITY_SHIFT_SENTINEL = 1000
@@ -176,6 +179,27 @@ async def _get_plan_with_assignments(stmt, db: AsyncSession) -> TherapyPlan | No
     return result.scalar_one_or_none()
 
 
+async def _get_current_therapist_plan(
+    patient_id: str,
+    therapist_id: uuid.UUID,
+    db: AsyncSession,
+) -> TherapyPlan | None:
+    result = await db.execute(
+        select(TherapyPlan)
+        .where(
+            TherapyPlan.patient_id == patient_id,
+            TherapyPlan.therapist_id == therapist_id,
+        )
+        .options(selectinload(TherapyPlan.assignments))
+        .order_by(TherapyPlan.created_at.desc())
+    )
+    plans = result.scalars().all()
+    for plan in plans:
+        if plan.status != "archived":
+            return plan
+    return plans[0] if plans else None
+
+
 async def _resolve_default_task_level_name(task_id: str, db: AsyncSession) -> str | None:
     result = await db.execute(
         select(TaskLevel.level_name)
@@ -185,6 +209,78 @@ async def _resolve_default_task_level_name(task_id: str, db: AsyncSession) -> st
     )
     level_name = result.scalar_one_or_none()
     return level_name.lower() if isinstance(level_name, str) else level_name
+
+
+async def _sync_patient_progress_to_assignment_level(
+    patient_id: uuid.UUID,
+    assignment: PlanTaskAssignment,
+    db: AsyncSession,
+) -> None:
+    if not assignment.initial_level_name:
+        return
+
+    level_result = await db.execute(
+        select(TaskLevel).where(
+            TaskLevel.task_id == assignment.task_id,
+            cast(TaskLevel.level_name, String) == assignment.initial_level_name,
+        )
+    )
+    level = level_result.scalar_one_or_none()
+    if not level:
+        return
+
+    progress_result = await db.execute(
+        select(PatientTaskProgress).where(
+            PatientTaskProgress.patient_id == patient_id,
+            PatientTaskProgress.task_id == assignment.task_id,
+        )
+    )
+    progress = progress_result.scalar_one_or_none()
+    if progress:
+        progress.current_level_id = level.level_id
+        progress.level_locked_until = None
+        progress.consecutive_passes = 0
+        progress.consecutive_fails = 0
+        progress.sessions_at_level = 0
+    else:
+        db.add(
+            PatientTaskProgress(
+                patient_id=patient_id,
+                task_id=assignment.task_id,
+                current_level_id=level.level_id,
+                consecutive_passes=0,
+                consecutive_fails=0,
+                total_attempts=0,
+                sessions_at_level=0,
+            )
+        )
+
+
+async def _reset_assignment_sessions_for_level_change(
+    plan: TherapyPlan,
+    assignment: PlanTaskAssignment,
+    db: AsyncSession,
+) -> None:
+    result = await db.execute(
+        select(Session).where(
+            Session.patient_id == plan.patient_id,
+            Session.plan_id == plan.plan_id,
+            Session.session_type == "therapy",
+        )
+    )
+    for session in result.scalars().all():
+        notes = parse_session_notes(session.session_notes)
+        if notes.get("assignment_id") != str(assignment.assignment_id):
+            continue
+        if notes.get("completed"):
+            continue
+        notes["queue_items"] = []
+        notes["queue_initialized"] = False
+        notes["current_queue_level"] = assignment.initial_level_name
+        notes["attempted_prompt_ids"] = []
+        notes["completed_prompt_ids"] = []
+        notes["passed_prompt_ids"] = []
+        session.session_notes = serialize_session_notes(notes)
 
 
 async def _validate_task_level_name(task_id: str, level_name: str, db: AsyncSession) -> str:
@@ -238,14 +334,7 @@ async def get_patient_plan(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    plan = await _get_plan_with_assignments(
-        select(TherapyPlan).where(
-            TherapyPlan.patient_id == patient_id,
-            TherapyPlan.therapist_id == therapist.therapist_id,
-        ).order_by(TherapyPlan.created_at.desc())
-        .limit(1),
-        db,
-    )
+    plan = await _get_current_therapist_plan(patient_id, therapist.therapist_id, db)
     if not plan:
         return None
     return await _plan_to_out(plan, db)
@@ -384,6 +473,11 @@ async def update_assignment(
         revision_new_value = {"initial_level_name": assignment.initial_level_name}
     elif body.day_index is not None:
         revision_old_value = {"day_index": original_day_index, "priority_order": original_priority}
+
+    if plan.status == "approved" and body.initial_level_name is not None:
+        await _sync_patient_progress_to_assignment_level(plan.patient_id, assignment, db)
+        await _reset_assignment_sessions_for_level_change(plan, assignment, db)
+
     await db.commit()
     revision = PlanRevisionHistory(
         plan_id=plan.plan_id,
@@ -520,7 +614,18 @@ async def approve_plan(
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(404, "Plan not found")
+    archive_result = await db.execute(
+        select(TherapyPlan).where(
+            TherapyPlan.patient_id == plan.patient_id,
+            TherapyPlan.therapist_id == therapist.therapist_id,
+            TherapyPlan.plan_id != plan.plan_id,
+            TherapyPlan.status == "approved",
+        )
+    )
+    for prior_plan in archive_result.scalars().all():
+        prior_plan.status = "archived"
     plan.status = "approved"
+    await clear_patient_plan_review_lock(plan.patient_id, db)
     await db.commit()
     revision = PlanRevisionHistory(
         plan_id=plan.plan_id,
@@ -554,6 +659,37 @@ async def approve_plan(
         await r.aclose()
     await db.commit()
     return {"message": "Plan approved"}
+
+
+@router.post("/{plan_id}/reject")
+async def reject_plan(
+    plan_id: str,
+    therapist: Annotated[Therapist, Depends(require_therapist)],
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(TherapyPlan).where(
+            TherapyPlan.plan_id == plan_id,
+            TherapyPlan.therapist_id == therapist.therapist_id,
+        )
+    )
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
+    if plan.status == "approved":
+        raise HTTPException(400, "Approved plans cannot be rejected")
+
+    plan.status = "archived"
+    db.add(
+        PlanRevisionHistory(
+            plan_id=plan.plan_id,
+            therapist_id=therapist.therapist_id,
+            action="reject",
+            note="Plan rejected by therapist.",
+        )
+    )
+    await db.commit()
+    return {"message": "Plan rejected. Patient remains locked until a plan is approved."}
 
 
 @router.get("/{plan_id}/revision-history", response_model=list[PlanRevisionEntryOut])

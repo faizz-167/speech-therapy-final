@@ -49,7 +49,13 @@ export default function TasksPage() {
         </div>
       )}
 
-      {allCompleted ? (
+      {anyEscalated ? (
+        <EmptyState
+          icon="LOCKED"
+          heading="Tasks Locked For Review"
+          subtext="Your therapist is reviewing a regenerated plan. You can continue once that plan is approved."
+        />
+      ) : allCompleted ? (
         <EmptyState
           icon="🎉"
           heading="All Done for Today!"
@@ -89,7 +95,7 @@ export default function TasksPage() {
                   </span>
                 </div>
               </div>
-              {t.status !== "completed" && (
+              {t.status !== "completed" && !anyEscalated && (
                 <Link href={`/patient/tasks/${t.assignment_id}`}>
                   <NeoButton>Start</NeoButton>
                 </Link>

@@ -80,7 +80,7 @@ export interface RegeneratedAssignment {
 export interface RegeneratedPlan {
   plan_id: string;
   plan_name: string;
-  status: "draft" | "approved";
+  status: "draft" | "approved" | "archived";
   created_at: string;
   regeneration_note: string | null;
   assignments: RegeneratedAssignment[];

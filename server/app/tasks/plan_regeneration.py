@@ -3,6 +3,7 @@ import json
 import logging
 import psycopg2
 import redis
+from datetime import date, timedelta
 
 from app.celery_app import celery_app
 from app.config import settings
@@ -37,11 +38,7 @@ def regenerate_plan_after_escalation(
         new_level_name = _degrade_level(escalation_level_name)
 
         # 4.3 — Archive current approved plan (idempotent)
-        cur.execute(
-            "UPDATE therapy_plan SET status = 'archived' WHERE patient_id = %s AND status = 'approved'",
-            (patient_id,),
-        )
-        archived = cur.rowcount
+        archived = 0
         if archived == 0:
             logger.warning(
                 "No approved plan found to archive for patient %s — continuing", patient_id
@@ -100,11 +97,21 @@ def regenerate_plan_after_escalation(
 
         # 4.4g — Insert new therapy_plan as draft
         new_plan_id = uuid.uuid4()
-        plan_name = f"Auto-Regenerated {new_level_name.title()} Plan"
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())   # Monday
+        week_end = week_start + timedelta(days=6)              # Sunday
+        plan_name = f"Week of {week_start.strftime('%b')} {week_start.day}, {week_start.year} — {new_level_name.title()} Level"
+        goals = (
+            f"Plan auto-generated after escalation: level changed from "
+            f"{escalation_level_name} \u2192 {new_level_name} for all tasks after 2 "
+            f"consecutive adaptation thresholds were reached."
+        )
         cur.execute(
-            "INSERT INTO therapy_plan (plan_id, patient_id, therapist_id, plan_name, status, created_at)"
-            " VALUES (%s, %s, %s, %s, 'draft', NOW())",
-            (str(new_plan_id), patient_id, therapist_id, plan_name),
+            "INSERT INTO therapy_plan"
+            " (plan_id, patient_id, therapist_id, plan_name, goals, start_date, end_date, status, created_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, 'draft', NOW())",
+            (str(new_plan_id), patient_id, therapist_id, plan_name, goals,
+             week_start.isoformat(), week_end.isoformat()),
         )
 
         # 4.4h — Insert plan_task_assignment rows (up to 14, cycling 7-day week)
@@ -135,6 +142,23 @@ def regenerate_plan_after_escalation(
                     new_level_name,
                 ),
             )
+
+            # Reset patient_task_progress so the patient portal reflects the new
+            # degraded level immediately (not the stale prior-level progress row).
+            if level_id is not None:
+                cur.execute(
+                    "INSERT INTO patient_task_progress"
+                    " (patient_id, task_id, current_level_id,"
+                    "  consecutive_passes, consecutive_fails, total_attempts, sessions_at_level)"
+                    " VALUES (%s, %s, %s, 0, 0, 0, 0)"
+                    " ON CONFLICT (patient_id, task_id) DO UPDATE SET"
+                    "  current_level_id = EXCLUDED.current_level_id,"
+                    "  level_locked_until = NULL,"
+                    "  consecutive_passes = 0,"
+                    "  consecutive_fails = 0,"
+                    "  sessions_at_level = 0",
+                    (patient_id, task_id, level_id),
+                )
 
         # 4.5 — Insert plan_revision_history row
         cur.execute(

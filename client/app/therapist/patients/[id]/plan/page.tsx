@@ -90,6 +90,16 @@ export default function PlanPage() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Approval failed"),
   });
 
+  const rejectMutation = useMutation({
+    mutationFn: () => api.post(`/plans/${plan!.plan_id}/reject`, {}),
+    onSuccess: async () => {
+      toast.success("Plan rejected. Patient stays locked until a plan is approved.");
+      await qc.invalidateQueries({ queryKey: ["therapist", "plan", id] });
+      await qc.invalidateQueries({ queryKey: ["therapist", "dashboard"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Rejection failed"),
+  });
+
   async function handleGenerate() {
     setGenerating(true);
     try {
@@ -137,7 +147,7 @@ export default function PlanPage() {
                 <div className="font-bold tracking-widest text-sm mt-3 uppercase">
                   {plan.start_date ?? "TBD"} — {plan.end_date ?? "TBD"}
                 </div>
-                {plan.goals && (
+                {plan.goals && !plan.goals.includes("auto-generated after escalation") && (
                   <p className="text-sm font-medium mt-2 text-neo-black/80 max-w-lg">{plan.goals}</p>
                 )}
              </div>
@@ -147,12 +157,21 @@ export default function PlanPage() {
                    <span className="text-xs font-bold uppercase tracking-widest text-neo-black/70 border-2 border-gray-300 px-3 py-2">Saving...</span>
                  )}
                  {plan.status === "approved" && <span className="bg-neo-primary border-4 border-neo-black px-4 py-2 font-black uppercase text-sm shadow-neo-sm text-neo-black flex items-center tracking-widest">APPROVED</span>}
-                 {plan.status === "draft" && <NeoButton onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending} className="shadow-neo-sm bg-neo-primary text-neo-black tracking-widest hover:text-white">{approveMutation.isPending ? "APPROVING..." : "APPROVE PLAN"}</NeoButton>}
+                 {plan.status === "draft" && <NeoButton onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending || rejectMutation.isPending} className="shadow-neo-sm bg-neo-primary text-neo-black tracking-widest hover:text-white">{approveMutation.isPending ? "APPROVING..." : "APPROVE PLAN"}</NeoButton>}
+                 {plan.status === "draft" && <NeoButton variant="secondary" onClick={() => rejectMutation.mutate()} disabled={approveMutation.isPending || rejectMutation.isPending} className="tracking-widest shadow-neo-sm">{rejectMutation.isPending ? "REJECTING..." : "REJECT PLAN"}</NeoButton>}
                  <NeoButton variant="secondary" onClick={handleGenerate} disabled={generating} className="bg-neo-warning text-neo-black tracking-widest shadow-neo-sm hover:bg-neo-black hover:text-neo-warning transition-colors">
                     {generating ? "GENERATING..." : "🔄 REGENERATE"}
                  </NeoButton>
              </div>
           </div>
+
+          {plan.goals?.includes("auto-generated after escalation") && (
+            <div className="bg-red-100 border-4 border-red-600 px-4 py-3 font-bold text-sm shadow-neo-sm mb-4 space-y-1">
+              <p className="text-red-800 font-black uppercase tracking-widest text-xs">Auto-Regenerated Plan — Escalation Triggered</p>
+              <p className="text-red-700">{plan.goals}</p>
+              <p className="text-red-600 text-xs font-medium">All tasks have been set to the new level. Approve this plan to unblock the patient.</p>
+            </div>
+          )}
 
           <div className="bg-neo-primary/40 border-4 border-neo-black px-4 py-3 font-bold text-sm shadow-neo-sm -rotate-1 mb-8 space-y-2">
              <p>{plan.status === "approved" ? "You are editing the patient-visible approved plan. Changes here should appear on the patient side after refresh or live update." : "You are editing a draft plan. The patient will keep seeing their last approved plan until you approve this one."}</p>

@@ -36,7 +36,7 @@ interface DayColumnProps {
   assignments: Assignment[];
   availableTasks: Task[];
   onAdd: (taskId: string, dayIndex: number) => Promise<void>;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => Promise<void>;
   onUpdateLevel: (assignmentId: string, levelName: string) => Promise<void>;
 }
 

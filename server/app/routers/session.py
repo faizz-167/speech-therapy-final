@@ -16,6 +16,7 @@ from app.models.plan import TherapyPlan, PlanTaskAssignment
 from app.schemas.session import StartSessionRequest, AttemptStatusResponse
 from app.tasks.analysis import analyze_attempt
 from app.config import settings
+from app.utils.plan_lock import patient_has_pending_plan_review
 from app.utils.session_notes import default_session_notes, parse_session_notes, serialize_session_notes
 
 router = APIRouter()
@@ -35,6 +36,12 @@ async def start_session(
     patient: Annotated[Patient, Depends(require_patient)],
     db: AsyncSession = Depends(get_db),
 ):
+    if await patient_has_pending_plan_review(patient.patient_id, db):
+        raise HTTPException(
+            status_code=403,
+            detail="All tasks are locked until your therapist approves the regenerated plan.",
+        )
+
     resolved_plan_id = None
     assignment: PlanTaskAssignment | None = None
     if body.assignment_id:
@@ -122,6 +129,12 @@ async def submit_attempt(
     session = await db.get(Session, session_id)
     if not session or session.patient_id != patient.patient_id:
         raise HTTPException(404, "Session not found")
+
+    if await patient_has_pending_plan_review(patient.patient_id, db):
+        raise HTTPException(
+            status_code=403,
+            detail="All tasks are locked until your therapist approves the regenerated plan.",
+        )
 
     attempt_notes = parse_session_notes(session.session_notes)
     if attempt_notes.get("escalated"):
