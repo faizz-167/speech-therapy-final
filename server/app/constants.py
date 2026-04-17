@@ -1,0 +1,28 @@
+"""Named constants replacing magic numbers across the codebase."""
+
+# --- Attempt / Scoring ---
+MAX_ATTEMPTS_PER_PROMPT = 3
+ESCALATION_INTERVENTION_LIMIT = 2
+
+# --- ASR Quality Gates ---
+ASR_LOW_CONFIDENCE_THRESHOLD = 0.55
+NO_SPEECH_CONFIDENCE_FLOOR = 0.35
+NO_SPEECH_MIN_DURATION = 1.0
+
+# --- Baseline ---
+BASELINE_PASS_THRESHOLD = 70
+BASELINE_ITEM_CAP = 7
+
+# --- Adaptive Level Thresholds ---
+LEVEL_ADVANCE_THRESHOLD = 75
+LEVEL_STAY_MIN_THRESHOLD = 60
+
+# --- Speech Rate Defaults ---
+DEFAULT_IDEAL_WPM_MIN = 80
+DEFAULT_IDEAL_WPM_MAX = 120
+DEFAULT_WPM_TOLERANCE = 20
+
+# --- Default Scores (fallbacks) ---
+DEFAULT_RL_SCORE = 70.0
+DEFAULT_TC_SCORE = 80.0
+DEFAULT_AQ_SCORE = 30.0

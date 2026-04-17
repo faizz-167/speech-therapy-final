@@ -37,6 +37,34 @@ def score_to_level(score: float) -> str:
     return "beginner"
 
 
+def _safe_float(value) -> float | None:
+    """Convert a value to float if not None."""
+    return float(value) if value is not None else None
+
+
+async def _get_latest_baseline_result(
+    patient_id, db: AsyncSession,
+) -> BaselineResultOut | None:
+    """Shared query for the latest baseline result for a patient."""
+    result = await db.execute(
+        select(PatientBaselineResult)
+        .where(PatientBaselineResult.patient_id == patient_id)
+        .order_by(PatientBaselineResult.assessed_on.desc())
+        .limit(1)
+    )
+    br = result.scalars().first()
+    if not br:
+        return None
+    assessment = await db.get(BaselineAssessment, br.baseline_id)
+    return BaselineResultOut(
+        result_id=str(br.result_id),
+        baseline_name=assessment.name if assessment else br.baseline_id,
+        raw_score=br.raw_score or 0,
+        level=br.severity_rating or score_to_level(br.raw_score or 0),
+        assessed_on=br.assessed_on,
+    )
+
+
 @router.get("/exercises", response_model=list[BaselineAssessmentOut])
 async def get_baseline_exercises(
     patient: Annotated[Patient, Depends(require_patient)],
@@ -302,23 +330,7 @@ async def get_baseline_result(
     patient: Annotated[Patient, Depends(require_patient)],
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(PatientBaselineResult)
-        .where(PatientBaselineResult.patient_id == patient.patient_id)
-        .order_by(PatientBaselineResult.assessed_on.desc())
-        .limit(1)
-    )
-    br = result.scalars().first()
-    if not br:
-        return None
-    assessment = await db.get(BaselineAssessment, br.baseline_id)
-    return BaselineResultOut(
-        result_id=str(br.result_id),
-        baseline_name=assessment.name if assessment else br.baseline_id,
-        raw_score=br.raw_score or 0,
-        level=br.severity_rating or score_to_level(br.raw_score or 0),
-        assessed_on=br.assessed_on,
-    )
+    return await _get_latest_baseline_result(patient.patient_id, db)
 
 
 @router.get("/therapist-view/{patient_id}", response_model=BaselineResultOut | None)
@@ -330,23 +342,7 @@ async def therapist_get_baseline(
     patient = await db.get(Patient, patient_id)
     if not patient or patient.assigned_therapist_id != therapist.therapist_id:
         raise HTTPException(404, "Patient not found")
-    result = await db.execute(
-        select(PatientBaselineResult)
-        .where(PatientBaselineResult.patient_id == patient_id)
-        .order_by(PatientBaselineResult.assessed_on.desc())
-        .limit(1)
-    )
-    br = result.scalars().first()
-    if not br:
-        return None
-    assessment = await db.get(BaselineAssessment, br.baseline_id)
-    return BaselineResultOut(
-        result_id=str(br.result_id),
-        baseline_name=assessment.name if assessment else br.baseline_id,
-        raw_score=br.raw_score or 0,
-        level=br.severity_rating or score_to_level(br.raw_score or 0),
-        assessed_on=br.assessed_on,
-    )
+    return await _get_latest_baseline_result(patient_id, db)
 
 
 @router.get("/therapist-view/{patient_id}/items", response_model=list[BaselineItemDetailOut])
@@ -390,59 +386,33 @@ async def therapist_get_baseline_items(
             for attempt in attempts_result.scalars().all()
         }
     return [
-        BaselineItemDetailOut(
-            item_id=item.item_id,
-            prompt_text=item.instruction or item.display_content,
-            transcript=attempts_by_item.get(item.item_id).asr_transcript if attempts_by_item.get(item.item_id) else None,
-            word_accuracy=(
-                float(attempts_by_item[item.item_id].ml_word_accuracy)
-                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_word_accuracy is not None
-                else None
-            ),
-            phoneme_accuracy=(
-                float(attempts_by_item[item.item_id].ml_phoneme_accuracy)
-                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_phoneme_accuracy is not None
-                else None
-            ),
-            pa_available=(
-                bool(attempts_by_item[item.item_id].pa_available)
-                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].pa_available is not None
-                else None
-            ),
-            fluency_score=(
-                float(attempts_by_item[item.item_id].ml_fluency_score)
-                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_fluency_score is not None
-                else None
-            ),
-            speech_rate_wpm=(
-                float(attempts_by_item[item.item_id].ml_speech_rate_wpm)
-                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_speech_rate_wpm is not None
-                else None
-            ),
-            speech_rate_score=(
-                float(attempts_by_item[item.item_id].ml_speech_rate_score)
-                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_speech_rate_score is not None
-                else None
-            ),
-            confidence_score=(
-                float(attempts_by_item[item.item_id].ml_confidence)
-                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].ml_confidence is not None
-                else None
-            ),
-            emotion_score=(
-                float(attempts_by_item[item.item_id].emotion_score)
-                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].emotion_score is not None
-                else None
-            ),
-            engagement_score=(
-                float(attempts_by_item[item.item_id].engagement_score)
-                if attempts_by_item.get(item.item_id) and attempts_by_item[item.item_id].engagement_score is not None
-                else None
-            ),
-            dominant_emotion=attempts_by_item.get(item.item_id).dominant_emotion if attempts_by_item.get(item.item_id) else None,
-            final_score=float(item_result.score_given) if item_result.score_given is not None else 0.0,
-            pass_fail=(float(item_result.score_given) >= 70) if item_result.score_given is not None else False,
-            created_at=baseline_result.assessed_on.isoformat(),
-        )
+        _build_item_detail(item, item_result, attempts_by_item.get(item.item_id), baseline_result)
         for item_result, item in rows
     ]
+
+
+def _build_item_detail(
+    item: BaselineItem,
+    item_result: BaselineItemResult,
+    attempt: BaselineAttempt | None,
+    baseline_result: PatientBaselineResult,
+) -> BaselineItemDetailOut:
+    """Build a single baseline item detail from the item, result, and optional attempt."""
+    return BaselineItemDetailOut(
+        item_id=item.item_id,
+        prompt_text=item.instruction or item.display_content,
+        transcript=attempt.asr_transcript if attempt else None,
+        word_accuracy=_safe_float(attempt.ml_word_accuracy) if attempt else None,
+        phoneme_accuracy=_safe_float(attempt.ml_phoneme_accuracy) if attempt else None,
+        pa_available=bool(attempt.pa_available) if attempt and attempt.pa_available is not None else None,
+        fluency_score=_safe_float(attempt.ml_fluency_score) if attempt else None,
+        speech_rate_wpm=_safe_float(attempt.ml_speech_rate_wpm) if attempt else None,
+        speech_rate_score=_safe_float(attempt.ml_speech_rate_score) if attempt else None,
+        confidence_score=_safe_float(attempt.ml_confidence) if attempt else None,
+        emotion_score=_safe_float(attempt.emotion_score) if attempt else None,
+        engagement_score=_safe_float(attempt.engagement_score) if attempt else None,
+        dominant_emotion=attempt.dominant_emotion if attempt else None,
+        final_score=float(item_result.score_given) if item_result.score_given is not None else 0.0,
+        pass_fail=(float(item_result.score_given) >= 70) if item_result.score_given is not None else False,
+        created_at=baseline_result.assessed_on.isoformat(),
+    )

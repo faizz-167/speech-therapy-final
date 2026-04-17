@@ -28,6 +28,20 @@ router = APIRouter()
 _PRIORITY_SHIFT_SENTINEL = 1000
 
 
+async def _get_owned_plan(plan_id: str, therapist_id, db: AsyncSession) -> TherapyPlan:
+    """Fetch a TherapyPlan owned by the given therapist, or raise 404."""
+    result = await db.execute(
+        select(TherapyPlan).where(
+            TherapyPlan.plan_id == plan_id,
+            TherapyPlan.therapist_id == therapist_id,
+        )
+    )
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
+    return plan
+
+
 def _build_revision_summary(entry: PlanRevisionHistory) -> str | None:
     if entry.note:
         return entry.note
@@ -365,15 +379,7 @@ async def add_task(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(TherapyPlan).where(
-            TherapyPlan.plan_id == plan_id,
-            TherapyPlan.therapist_id == therapist.therapist_id,
-        )
-    )
-    plan = result.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(404, "Plan not found")
+    plan = await _get_owned_plan(plan_id, therapist.therapist_id, db)
     task = await db.get(Task, body.task_id)
     if not task:
         raise HTTPException(404, "Task not found")
@@ -430,15 +436,7 @@ async def update_assignment(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    plan_result = await db.execute(
-        select(TherapyPlan).where(
-            TherapyPlan.plan_id == plan_id,
-            TherapyPlan.therapist_id == therapist.therapist_id,
-        )
-    )
-    plan = plan_result.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(404, "Plan not found")
+    plan = await _get_owned_plan(plan_id, therapist.therapist_id, db)
     result = await db.execute(
         select(PlanTaskAssignment).where(
             PlanTaskAssignment.assignment_id == assignment_id,
@@ -534,15 +532,7 @@ async def delete_assignment(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    plan_result = await db.execute(
-        select(TherapyPlan).where(
-            TherapyPlan.plan_id == plan_id,
-            TherapyPlan.therapist_id == therapist.therapist_id,
-        )
-    )
-    plan = plan_result.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(404, "Plan not found")
+    plan = await _get_owned_plan(plan_id, therapist.therapist_id, db)
     result = await db.execute(
         select(PlanTaskAssignment).where(
             PlanTaskAssignment.assignment_id == assignment_id,
@@ -605,15 +595,7 @@ async def approve_plan(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(TherapyPlan).where(
-            TherapyPlan.plan_id == plan_id,
-            TherapyPlan.therapist_id == therapist.therapist_id,
-        )
-    )
-    plan = result.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(404, "Plan not found")
+    plan = await _get_owned_plan(plan_id, therapist.therapist_id, db)
     archive_result = await db.execute(
         select(TherapyPlan).where(
             TherapyPlan.patient_id == plan.patient_id,
@@ -667,15 +649,7 @@ async def reject_plan(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(TherapyPlan).where(
-            TherapyPlan.plan_id == plan_id,
-            TherapyPlan.therapist_id == therapist.therapist_id,
-        )
-    )
-    plan = result.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(404, "Plan not found")
+    plan = await _get_owned_plan(plan_id, therapist.therapist_id, db)
     if plan.status == "approved":
         raise HTTPException(400, "Approved plans cannot be rejected")
 
@@ -698,15 +672,7 @@ async def get_revision_history(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    plan_result = await db.execute(
-        select(TherapyPlan).where(
-            TherapyPlan.plan_id == plan_id,
-            TherapyPlan.therapist_id == therapist.therapist_id,
-        )
-    )
-    plan = plan_result.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(404, "Plan not found")
+    plan = await _get_owned_plan(plan_id, therapist.therapist_id, db)
     history_result = await db.execute(
         select(PlanRevisionHistory)
         .where(PlanRevisionHistory.plan_id == plan.plan_id)
@@ -731,15 +697,7 @@ async def tasks_for_defects(
     therapist: Annotated[Therapist, Depends(require_therapist)],
     db: AsyncSession = Depends(get_db),
 ):
-    plan_result = await db.execute(
-        select(TherapyPlan).where(
-            TherapyPlan.plan_id == plan_id,
-            TherapyPlan.therapist_id == therapist.therapist_id,
-        )
-    )
-    plan = plan_result.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(404, "Plan not found")
+    plan = await _get_owned_plan(plan_id, therapist.therapist_id, db)
     patient = await db.get(Patient, plan.patient_id)
     if not patient:
         raise HTTPException(404, "Patient not found")
