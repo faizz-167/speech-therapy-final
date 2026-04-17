@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -481,6 +481,72 @@ async def _ensure_patient_notifications(
     await db.commit()
 
 
+async def _recalculate_streak(patient: Patient, db: AsyncSession) -> tuple[int, int]:
+    """Recalculate current and best streak from historical attempt data.
+
+    Returns (current_streak, longest_streak). Persists updated values to DB.
+    """
+    rows_result = await db.execute(
+        text(
+            "SELECT DISTINCT DATE(asd.created_at AT TIME ZONE 'UTC')"
+            " FROM attempt_score_detail asd"
+            " JOIN session_prompt_attempt spa ON spa.attempt_id = asd.attempt_id"
+            " JOIN session s ON s.session_id = spa.session_id"
+            " WHERE s.patient_id = :pid"
+            " ORDER BY 1 DESC"
+        ),
+        {"pid": str(patient.patient_id)},
+    )
+    activity_dates = sorted({r[0] for r in rows_result.fetchall()}, reverse=True)
+
+    if not activity_dates:
+        return 0, int(patient.longest_streak or 0)
+
+    today_utc = datetime.now(timezone.utc).date()
+
+    # Streak is broken if most recent activity is more than 1 day ago
+    if activity_dates[0] < today_utc - timedelta(days=1):
+        current_streak = 0
+    else:
+        current_streak = 1
+        for i in range(1, len(activity_dates)):
+            delta = (activity_dates[i - 1] - activity_dates[i]).days
+            if delta == 1:
+                current_streak += 1
+            elif delta == 0:
+                continue
+            else:
+                break
+
+    # Best streak: scan all dates for longest consecutive run
+    best_streak = current_streak
+    run = 1
+    for i in range(1, len(activity_dates)):
+        delta = (activity_dates[i - 1] - activity_dates[i]).days
+        if delta == 1:
+            run += 1
+            best_streak = max(best_streak, run)
+        elif delta == 0:
+            continue
+        else:
+            run = 1
+
+    best_streak = max(best_streak, int(patient.longest_streak or 0))
+
+    # Persist only when values changed to avoid unnecessary writes
+    if patient.current_streak != current_streak or patient.longest_streak != best_streak:
+        await db.execute(
+            text(
+                "UPDATE patient SET current_streak=:cs, longest_streak=:ls"
+                " WHERE patient_id=:pid"
+            ),
+            {"cs": current_streak, "ls": best_streak, "pid": str(patient.patient_id)},
+        )
+        await db.commit()
+
+    return current_streak, best_streak
+
+
 @router.get("/profile", response_model=PatientProfileOut)
 async def get_profile(
     patient: Annotated[Patient, Depends(require_patient)],
@@ -504,6 +570,11 @@ async def get_profile(
         if therapist:
             therapist_name = therapist.full_name
 
+    # Recalculate streak on every profile fetch — keeps it accurate for both
+    # new users (updated in real-time after attempts) and existing users whose
+    # historical data was never counted.
+    current_streak, best_streak = await _recalculate_streak(patient, db)
+
     return {
         "patient_id": str(patient.patient_id),
         "full_name": patient.full_name,
@@ -511,8 +582,8 @@ async def get_profile(
         "date_of_birth": patient.date_of_birth,
         "gender": patient.gender,
         "status": patient.status.value,
-        "current_streak": patient.current_streak,
-        "best_streak": patient.longest_streak,
+        "current_streak": current_streak,
+        "best_streak": best_streak,
         "assigned_defects": assigned_defects,
         "therapist_name": therapist_name,
         "primary_diagnosis": patient.primary_diagnosis,

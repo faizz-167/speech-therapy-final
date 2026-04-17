@@ -7,7 +7,7 @@ emotion summaries, review notifications, and Redis WS publishing.
 import json
 import uuid
 from collections import Counter
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import redis
 
@@ -223,6 +223,7 @@ def build_ws_payload(
     dominant_emotion: str,
     review_recommended: bool,
     fail_reason: str | None,
+    friendly_feedback: str | None = None,
 ) -> dict:
     return {
         "type": "score_ready",
@@ -247,9 +248,62 @@ def build_ws_payload(
         "asr_transcript": transcript,
         "review_recommended": review_recommended,
         "fail_reason": fail_reason,
+        "friendly_feedback": friendly_feedback,
     }
 
 
 def publish_score_event(patient_id: str, payload: dict) -> None:
     redis_client = redis.from_url(settings.redis_url)
     redis_client.publish(f"ws:patient:{patient_id}", json.dumps(payload))
+
+
+# ---------------------------------------------------------------------------
+# Streak tracking
+# ---------------------------------------------------------------------------
+
+def update_patient_streak(cur, patient_id: str) -> int:
+    """Recalculate current_streak and update longest_streak. Returns new current_streak."""
+    # Collect all distinct UTC dates where the patient had any scored attempt
+    cur.execute(
+        "SELECT DISTINCT DATE(asd.created_at AT TIME ZONE 'UTC')"
+        " FROM attempt_score_detail asd"
+        " JOIN session_prompt_attempt spa ON spa.attempt_id = asd.attempt_id"
+        " JOIN session s ON s.session_id = spa.session_id"
+        " WHERE s.patient_id = %s"
+        " ORDER BY 1 DESC",
+        (patient_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return 0
+
+    activity_dates = sorted({r[0] for r in rows}, reverse=True)
+    today_utc = datetime.now(timezone.utc).date()
+
+    # Streak must include today or yesterday (allow same-day multi-entry)
+    if activity_dates[0] < today_utc - timedelta(days=1):
+        # Most recent activity was more than 1 day ago — streak is 0
+        cur.execute(
+            "UPDATE patient SET current_streak=0 WHERE patient_id=%s",
+            (patient_id,),
+        )
+        return 0
+
+    streak = 1
+    for i in range(1, len(activity_dates)):
+        delta = (activity_dates[i - 1] - activity_dates[i]).days
+        if delta == 1:
+            streak += 1
+        elif delta == 0:
+            continue  # same day, skip duplicate
+        else:
+            break
+
+    cur.execute(
+        "UPDATE patient"
+        " SET current_streak=%s,"
+        "     longest_streak=GREATEST(longest_streak, %s)"
+        " WHERE patient_id=%s",
+        (streak, streak, patient_id),
+    )
+    return streak

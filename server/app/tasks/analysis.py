@@ -25,9 +25,11 @@ from app.tasks.attempt_persistence import (
     create_review_notification,
     insert_score_detail,
     publish_score_event,
+    update_patient_streak,
     upsert_patient_task_progress,
     upsert_session_emotion_summary,
 )
+from app.utils.feedback import generate_friendly_feedback
 from app.tasks.plan_regeneration import regenerate_plan_after_escalation
 from app.tasks.scoring_helpers import (
     apply_emotion_priority_override,
@@ -260,6 +262,38 @@ def _compute_all_scores(ctx: dict, config: dict, ml: dict) -> dict:
     word_accuracy_available = bool(target_text)
     word_accuracy = as_float(compute_word_accuracy(transcript, target_text), default=0.0) if word_accuracy_available else 0.0
 
+    if word_accuracy_available and word_accuracy == 0.0:
+        return {
+            "word_accuracy": word_accuracy,
+            "phoneme_accuracy": None,
+            "pa_available": False,
+            "fluency_score": 0.0,
+            "speech_rate_wpm": 0,
+            "speech_rate_score": 0.0,
+            "confidence_score": 0.0,
+            "rl_score": 0.0,
+            "tc_score": 0.0,
+            "aq_score": 0.0,
+            "emotion_score": 0.0,
+            "dominant_emotion": None,
+            "behavioral_score": 0.0,
+            "engagement_score": 0.0,
+            "speech_score": 0.0,
+            "final_score": 0.0,
+            "adaptive_decision": "stay",
+            "pass_fail": "fail",
+            "performance_level": "needs_retry",
+            "low_confidence": False,
+            "review_recommended": False,
+            "fail_reason": "Word accuracy is 0. Please retry the same prompt.",
+            "disfluency_rate": 0.0,
+            "pause_score": 0.0,
+            "target_phoneme_results": json.dumps({}),
+            "transcript": transcript,
+            "duration": duration,
+            "skip_progress_update": True,
+        }
+
     phoneme_result = ml["phoneme_result"]
     pa_available = bool(phoneme_result.get("inference_ok"))
     phoneme_accuracy = as_float(phoneme_result.get("phoneme_accuracy"), default=0.0) if pa_available else None
@@ -339,6 +373,7 @@ def _compute_all_scores(ctx: dict, config: dict, ml: dict) -> dict:
         "target_phoneme_results": json.dumps(ml["phoneme_result"].get("target_phoneme_results") or {}),
         "transcript": transcript,
         "duration": duration,
+        "skip_progress_update": False,
     }
 
 
@@ -401,15 +436,18 @@ def _persist_and_publish(conn, ctx: dict, config: dict, scores: dict) -> None:
     if queue_active and scores["pass_fail"] == "pass":
         progress_decision = "stay"
 
-    upsert_patient_task_progress(
-        cur, patient_id, task_id, level_id,
-        progress_decision, scores["final_score"], scores["pass_fail"],
-    )
+    if not scores.get("skip_progress_update"):
+        upsert_patient_task_progress(
+            cur, patient_id, task_id, level_id,
+            progress_decision, scores["final_score"], scores["pass_fail"],
+        )
     mark_prompt_terminal(cur, session_id, ctx["prompt_id"], scores["pass_fail"], attempt_number)
     upsert_session_emotion_summary(cur, session_id, patient_id)
 
     if scores["review_recommended"] and assigned_therapist_id:
         create_review_notification(cur, assigned_therapist_id, patient_id, attempt_id)
+
+    new_streak = update_patient_streak(cur, patient_id)
 
     conn.commit()
 
@@ -426,6 +464,16 @@ def _persist_and_publish(conn, ctx: dict, config: dict, scores: dict) -> None:
                 patient_id, str(assigned_therapist_id), str(escalation_level),
             )
 
+    friendly_feedback = generate_friendly_feedback(
+        pass_fail=scores["pass_fail"],
+        adaptive_decision=adaptive_decision,
+        dominant_emotion=scores["dominant_emotion"],
+        emotion_score=scores["emotion_score"],
+        final_score=scores["final_score"],
+        fail_reason=scores["fail_reason"],
+        current_streak=new_streak,
+    )
+
     # Publish WebSocket event
     payload = build_ws_payload(
         attempt_id, attempt_number, scores["transcript"],
@@ -435,6 +483,7 @@ def _persist_and_publish(conn, ctx: dict, config: dict, scores: dict) -> None:
         scores["engagement_score"], scores["emotion_score"], scores["final_score"],
         scores["pass_fail"], adaptive_decision, performance_level,
         scores["dominant_emotion"], scores["review_recommended"], scores["fail_reason"],
+        friendly_feedback,
     )
     publish_score_event(patient_id, payload)
 
@@ -496,6 +545,8 @@ def _handle_no_speech(conn, ctx: dict, config: dict) -> None:
     if assigned_therapist_id:
         create_review_notification(cur, assigned_therapist_id, patient_id, attempt_id)
 
+    update_patient_streak(cur, patient_id)
+
     conn.commit()
 
     # Escalation → plan regeneration
@@ -511,12 +562,22 @@ def _handle_no_speech(conn, ctx: dict, config: dict) -> None:
                 patient_id, str(assigned_therapist_id), str(escalation_level),
             )
 
+    friendly_feedback = generate_friendly_feedback(
+        pass_fail="fail",
+        adaptive_decision=adaptive_decision,
+        dominant_emotion=None,
+        emotion_score=None,
+        final_score=0.0,
+        current_streak=0,
+        no_speech=True,
+    )
+
     payload = build_ws_payload(
         attempt_id, attempt_number, transcript,
         0.0, None, False, 0.0, 0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0,
         0.0, "fail", adaptive_decision, "needs_improvement", "neutral",
-        True, "No speech detected",
+        True, "No speech detected", friendly_feedback,
     )
     publish_score_event(patient_id, payload)
 

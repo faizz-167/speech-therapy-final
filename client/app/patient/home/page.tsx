@@ -28,7 +28,7 @@ export default function PatientHomePage() {
   const results = useQueries({
     queries: [
       { queryKey: ["patient", "home"], queryFn: () => api.get<HomeData>("/patient/home"), refetchOnWindowFocus: true, refetchInterval: 15000 },
-      { queryKey: ["patient", "profile"], queryFn: () => api.get<PatientProfile>("/patient/profile").catch(() => null), refetchOnWindowFocus: true },
+      { queryKey: ["patient", "profile"], queryFn: () => api.get<PatientProfile>("/patient/profile").catch(() => null), refetchOnWindowFocus: true, refetchInterval: 30000 },
       {
         queryKey: ["patient", "tasks"],
         queryFn: () => api.get<TodayTasksResponse>("/patient/tasks").catch(() => ({ assignments: [], any_escalated: false })),
@@ -72,13 +72,18 @@ export default function PatientHomePage() {
             {firstName ? `Hey,\n${firstName}!` : "Welcome Back!"}
           </h1>
         </div>
-        {profile?.current_streak != null && profile.current_streak > 0 && (
-          <div className="mt-4 sm:mt-0 border-4 border-neo-black bg-neo-accent px-5 py-3 shadow-neo-sm rotate-1">
+        {profile != null && (
+          <div className={`mt-4 sm:mt-0 border-4 border-neo-black px-5 py-3 shadow-neo-sm rotate-1 ${profile.current_streak > 0 ? "bg-neo-accent" : "bg-white"}`}>
             <div className="flex items-center gap-3">
               <StreakFire count={profile.current_streak} />
               <div>
                 <p className="font-black text-2xl leading-none">{profile.current_streak}</p>
-                <p className="font-black uppercase text-[10px] tracking-widest">Day Streak</p>
+                <p className="font-black uppercase text-[10px] tracking-widest">
+                  {profile.current_streak > 0 ? "Day Streak" : "Start Your Streak"}
+                </p>
+                {profile.best_streak > 0 && (
+                  <p className="font-bold text-[9px] text-neo-black/60 mt-0.5">Best: {profile.best_streak}</p>
+                )}
               </div>
             </div>
           </div>
@@ -86,10 +91,11 @@ export default function PatientHomePage() {
       </div>
 
       {/* ── SUMMARY STATS ── */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { value: profile?.current_streak ?? 0, label: "Streak", accent: "bg-neo-accent", icon: "🔥" },
-          { value: data.today_tasks, label: "Tasks Today", accent: "bg-neo-secondary", icon: "📋" },
+          { value: profile?.current_streak ?? 0, label: "Current Streak", accent: "bg-neo-accent", icon: "🔥" },
+          { value: profile?.best_streak ?? 0, label: "Best Streak", accent: "bg-neo-secondary", icon: "🏆" },
+          { value: data.today_tasks, label: "Tasks Today", accent: "bg-white", icon: "📋" },
           { value: baseline?.level ? baseline.level.toUpperCase() : "—", label: "Baseline Level", accent: "bg-neo-muted", icon: "🧭" },
         ].map(({ value, label, accent, icon }, i) => (
           <div key={label} className={`border-4 border-neo-black ${accent} shadow-neo-sm hover:-translate-y-0.5 hover:shadow-neo-md transition-all duration-150 stagger-${i + 1}`}>

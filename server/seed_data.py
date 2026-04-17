@@ -74,6 +74,11 @@ SCORING_WEIGHTS = {
     "social_communication":  {"pa": 0.20, "wa": 0.30, "fs": 0.20, "srs": 0.10, "cs": 0.20},
 }
 
+FUSION_WEIGHTS = {
+    "speech": 0.50,
+    "engagement": 0.50,
+}
+
 for _c, _w in SCORING_WEIGHTS.items():
     assert abs(sum(_w.values()) - 1.0) < 0.001, f"{_c} weights != 1.0"
 
@@ -2512,7 +2517,7 @@ def seed_tasks(conn):
              version, notes, created_at)
             VALUES (:weight_id, :task_id,
                     :pa, :wa, :fs, :srs, :cs,
-                    0.60, 0.40,
+                    :fusion_w_speech, :fusion_w_engagement,
                     1.00, 0.00,
                     0.40, 0.35, 0.25,
                     75.0, 60.0, 74.0,
@@ -2550,6 +2555,8 @@ def seed_tasks(conn):
         """), {"weight_id": f"sw_{task['task_id']}", "task_id": task["task_id"],
                "pa": sw["pa"], "wa": sw["wa"], "fs": sw["fs"],
                "srs": sw["srs"], "cs": sw["cs"],
+               "fusion_w_speech": FUSION_WEIGHTS["speech"],
+               "fusion_w_engagement": FUSION_WEIGHTS["engagement"],
                "notes": task.get("scoring_notes")})
 
         for level in task["levels"]:

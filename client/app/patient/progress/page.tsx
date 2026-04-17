@@ -8,7 +8,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Cell, ReferenceLine,
 } from "recharts";
-import { Progress } from "@/types";
+import { PatientProfile, Progress } from "@/types";
 
 const LEVEL_ACCENT: Record<string, string> = {
   easy: "bg-neo-secondary border-neo-black",
@@ -48,6 +48,13 @@ export default function ProgressPage() {
     queryFn: () => api.get<Progress>("/patient/progress"),
   });
 
+  const { data: profile } = useQuery<PatientProfile>({
+    queryKey: ["patient", "profile"],
+    queryFn: () => api.get<PatientProfile>("/patient/profile"),
+    refetchOnWindowFocus: true,
+    refetchInterval: 30000,
+  });
+
   if (isLoading) return <LoadingState label="Loading progress..." />;
   if (error) return <ErrorState message={error instanceof Error ? error.message : "Failed to load"} />;
   if (!data || data.total_attempts === 0) {
@@ -84,6 +91,22 @@ export default function ProgressPage() {
           </div>
         ))}
       </div>
+
+      {/* ── STREAK ── */}
+      {(profile?.current_streak != null || profile?.best_streak != null) && (
+        <div className="grid grid-cols-2 gap-4 stagger-4">
+          <div className="border-4 border-neo-black bg-neo-accent shadow-neo-sm p-4 text-center hover:-translate-y-0.5 transition-transform">
+            <div className="text-3xl mb-1">🔥</div>
+            <div className="text-4xl font-black leading-none">{profile?.current_streak ?? 0}</div>
+            <div className="font-black uppercase text-[10px] tracking-widest mt-2 border-t-4 border-neo-black pt-2">Current Streak</div>
+          </div>
+          <div className="border-4 border-neo-black bg-neo-secondary shadow-neo-sm p-4 text-center hover:-translate-y-0.5 transition-transform">
+            <div className="text-3xl mb-1">🏆</div>
+            <div className="text-4xl font-black leading-none">{profile?.best_streak ?? 0}</div>
+            <div className="font-black uppercase text-[10px] tracking-widest mt-2 border-t-4 border-neo-black pt-2">Best Streak</div>
+          </div>
+        </div>
+      )}
 
       {/* ── EMOTION ── */}
       {data.dominant_emotion && (
