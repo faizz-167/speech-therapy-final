@@ -43,7 +43,67 @@ body {
 }
 @keyframes pop-in {
   0%   { opacity: 0; transform: scale(0.9); }
+  60%  { transform: scale(1.04); }
   100% { opacity: 1; transform: scale(1); }
 }
-.animate-fade-up  { animation: fade-up 0.3s ease forwards; }
-.animate-pop-in   { animation: pop-in 0.25s ease forwards; }
+@keyframes slide-right {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes bar-grow {
+  from { width: 0%; }
+  to   { width: var(--bar-target, 100%); }
+}
+@keyframes wave-bar {
+  0%,100% { transform: scaleY(0.25); }
+  50%     { transform: scaleY(1); }
+}
+@keyframes score-slam {
+  0%   { opacity: 0; transform: scale(0.6) translateY(20px); }
+  70%  { transform: scale(1.1) translateY(-4px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(255,107,107,0.6); }
+  70%  { box-shadow: 0 0 0 12px rgba(255,107,107,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,107,107,0); }
+}
+
+.animate-fade-up      { animation: fade-up 0.3s ease forwards; }
+.animate-pop-in       { animation: pop-in 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+.animate-slide-right  { animation: slide-right 0.3s ease forwards; }
+.animate-spin-slow    { animation: spin-slow 10s linear infinite; }
+.animate-bar-grow     { animation: bar-grow 0.7s ease-out forwards; }
+.animate-score-slam   { animation: score-slam 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+.animate-pulse-ring   { animation: pulse-ring 1.5s ease-out infinite; }
+
+.animate-wave-1 { animation: wave-bar 0.7s ease-in-out infinite 0.0s; }
+.animate-wave-2 { animation: wave-bar 0.7s ease-in-out infinite 0.1s; }
+.animate-wave-3 { animation: wave-bar 0.7s ease-in-out infinite 0.2s; }
+.animate-wave-4 { animation: wave-bar 0.7s ease-in-out infinite 0.3s; }
+.animate-wave-5 { animation: wave-bar 0.7s ease-in-out infinite 0.4s; }
+.animate-wave-6 { animation: wave-bar 0.7s ease-in-out infinite 0.5s; }
+.animate-wave-7 { animation: wave-bar 0.7s ease-in-out infinite 0.6s; }
+
+.stagger-1 { animation: stagger-in 0.3s ease forwards 0.05s; opacity: 0; }
+.stagger-2 { animation: stagger-in 0.3s ease forwards 0.10s; opacity: 0; }
+.stagger-3 { animation: stagger-in 0.3s ease forwards 0.15s; opacity: 0; }
+.stagger-4 { animation: stagger-in 0.3s ease forwards 0.20s; opacity: 0; }
+.stagger-5 { animation: stagger-in 0.3s ease forwards 0.25s; opacity: 0; }
+.stagger-6 { animation: stagger-in 0.3s ease forwards 0.30s; opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

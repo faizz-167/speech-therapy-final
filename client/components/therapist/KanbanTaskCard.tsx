@@ -13,34 +13,36 @@ interface Props {
 
 const LEVEL_OPTIONS = ["beginner", "intermediate", "advanced"];
 
+const LEVEL_ACCENT: Record<string, string> = {
+  beginner: "bg-neo-secondary",
+  intermediate: "bg-neo-muted",
+  advanced: "bg-neo-accent",
+};
+
+const CARD_COLORS = ["bg-neo-secondary", "bg-neo-muted", "bg-white", "bg-neo-accent"];
+
 export function KanbanTaskCard({ assignment, onDelete, onUpdateLevel }: Props) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: assignment.assignment_id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: assignment.assignment_id });
 
   const style = {
     transform: transform ? CSS.Transform.toString(transform) : undefined,
     transition,
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 50 : undefined,
   };
+
   const [editingLevel, setEditingLevel] = useState(false);
   const [selectedLevel, setSelectedLevel] = useState(assignment.initial_level_name ?? "beginner");
 
-  // Deterministic color based on task name length
-  const colors = ["bg-neo-secondary", "bg-neo-accent", "bg-neo-primary", "bg-white", "bg-neo-warning"];
-  const bgColor = colors[(assignment.task_name?.length || 0) % colors.length];
+  const cardBg = CARD_COLORS[(assignment.task_name?.length || 0) % CARD_COLORS.length];
+  const levelAccent = LEVEL_ACCENT[(assignment.initial_level_name ?? "").toLowerCase()] ?? "bg-white";
 
   async function handleSaveLevel() {
     try {
       await onUpdateLevel(assignment.assignment_id, selectedLevel);
       setEditingLevel(false);
     } catch {
-      // Mutation errors are handled by the page-level toast; keep the editor open.
+      // toast handled at page level
     }
   }
 
@@ -49,75 +51,67 @@ export function KanbanTaskCard({ assignment, onDelete, onUpdateLevel }: Props) {
       ref={setNodeRef}
       style={style}
       {...attributes}
-      className={`border-4 border-neo-black ${bgColor} shadow-neo-sm p-3 space-y-1 group hover:-translate-y-1 hover:shadow-neo-md transition-all`}
+      className={`border-4 border-neo-black ${cardBg} ${isDragging ? "shadow-neo-lg rotate-2" : "shadow-neo-sm hover:-translate-y-0.5 hover:shadow-neo-md"} transition-all duration-150`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div {...listeners} className="cursor-grab flex-1">
-          <div className="flex items-center gap-2 mb-1 opacity-50 font-black">
-             <span>∷</span>
-          </div>
-          <p className="font-black text-sm uppercase leading-tight">
-            {assignment.task_name}
-          </p>
-          <p className="text-xs font-bold opacity-80 mt-1">
-            {assignment.task_mode}
-          </p>
-          <div className="mt-2">
-            <span className="inline-flex border-2 border-neo-black bg-white px-2 py-0.5 text-[10px] font-black uppercase">
-              Level: {assignment.initial_level_name ?? "unset"}
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-col gap-1">
-          <button
-            onClick={() => setEditingLevel((value) => !value)}
-            className="border-2 border-neo-black min-w-8 h-6 flex flex-shrink-0 items-center justify-center px-1 text-[10px] font-black bg-white hover:bg-neo-secondary transition-colors"
-          >
-            Edit
-          </button>
-          <button
-            onClick={() => {
-              void onDelete(assignment.assignment_id).catch(() => {
-                // Mutation errors are handled by the page-level toast.
-              });
-            }}
-            className="border-2 border-neo-black w-6 h-6 flex flex-shrink-0 items-center justify-center font-black bg-white hover:bg-neo-accent transition-colors"
-          >
-            ✕
-          </button>
-        </div>
+      {/* Drag handle row */}
+      <div {...listeners} className="cursor-grab active:cursor-grabbing px-3 pt-2 pb-1 flex items-center gap-1.5 border-b-2 border-neo-black/15">
+        <span className="font-black text-neo-black/30 text-sm leading-none">∷</span>
+        <span className="font-black uppercase text-[9px] tracking-widest text-neo-black/30">drag</span>
       </div>
-      {editingLevel && (
-        <div className="space-y-2 border-t-2 border-neo-black pt-2">
-          <NeoSelect
-            value={selectedLevel}
-            onChange={(e) => setSelectedLevel(e.target.value)}
-            className="w-full border-2 border-neo-black bg-white px-2 py-2 text-xs font-bold uppercase"
-          >
-            {LEVEL_OPTIONS.map((level) => (
-              <option key={level} value={level}>
-                {level}
-              </option>
-            ))}
-          </NeoSelect>
-          <div className="flex gap-2">
-            <NeoButton size="sm" onClick={() => void handleSaveLevel()} className="flex-1 py-1 text-xs">
-              Save
-            </NeoButton>
-            <NeoButton
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setSelectedLevel(assignment.initial_level_name ?? "beginner");
-                setEditingLevel(false);
-              }}
-              className="flex-1 py-1 text-xs"
+
+      {/* Card body */}
+      <div className="px-3 py-2 space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="font-black text-xs uppercase leading-tight truncate">{assignment.task_name}</p>
+            {assignment.task_mode && (
+              <p className="text-[10px] font-bold text-neo-black/50 mt-0.5">{assignment.task_mode}</p>
+            )}
+          </div>
+          <div className="flex gap-1 shrink-0">
+            <button
+              onClick={() => setEditingLevel((v) => !v)}
+              className="border-2 border-neo-black bg-white w-6 h-6 flex items-center justify-center font-black text-[10px] hover:bg-neo-secondary transition-colors"
+              aria-label="Edit level"
             >
-              Cancel
-            </NeoButton>
+              ✎
+            </button>
+            <button
+              onClick={() => { void onDelete(assignment.assignment_id).catch(() => {}); }}
+              className="border-2 border-neo-black bg-white w-6 h-6 flex items-center justify-center font-black text-[10px] hover:bg-neo-accent transition-colors"
+              aria-label="Remove task"
+            >
+              ✕
+            </button>
           </div>
         </div>
-      )}
+
+        {/* Level badge */}
+        {!editingLevel && (
+          <div className={`inline-flex border-2 border-neo-black px-2 py-0.5 text-[9px] font-black uppercase ${levelAccent}`}>
+            {assignment.initial_level_name ?? "unset"}
+          </div>
+        )}
+
+        {/* Level editor */}
+        {editingLevel && (
+          <div className="space-y-2 border-t-2 border-neo-black/20 pt-2">
+            <NeoSelect
+              value={selectedLevel}
+              onChange={(e) => setSelectedLevel(e.target.value)}
+              className="w-full border-2 border-neo-black bg-white px-2 py-1.5 text-xs font-bold uppercase"
+            >
+              {LEVEL_OPTIONS.map((level) => (
+                <option key={level} value={level}>{level}</option>
+              ))}
+            </NeoSelect>
+            <div className="flex gap-1.5">
+              <NeoButton size="sm" onClick={() => void handleSaveLevel()} className="flex-1 h-7 text-[10px] py-0">Save</NeoButton>
+              <NeoButton size="sm" variant="ghost" onClick={() => { setSelectedLevel(assignment.initial_level_name ?? "beginner"); setEditingLevel(false); }} className="flex-1 h-7 text-[10px] py-0">Cancel</NeoButton>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
