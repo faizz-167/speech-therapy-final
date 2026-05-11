@@ -1,6 +1,6 @@
 import { useAuthStore } from "@/store/auth";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const PUBLIC_AUTH_PATHS = new Set([
   "/auth/login",
   "/auth/register/patient",

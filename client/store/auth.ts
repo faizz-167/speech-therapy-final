@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { UserRole } from "@/types/auth";
 import { queryClient } from "@/lib/queryClient";
+import { BASE_URL } from "@/lib/api";
 
 interface AuthState {
   token: string | null;
@@ -50,7 +51,6 @@ export const useAuthStore = create<AuthState>()(
       bootstrapAuth: async () => {
         const { token } = get();
         try {
-          const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
           const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
           const res = await fetch(`${BASE_URL}/auth/me`, {
             credentials: "include",

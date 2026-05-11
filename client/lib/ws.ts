@@ -81,9 +81,18 @@ export function createWebSocket(
       };
 
       ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        onMessage?.(data);
-        if (data.type === "score_ready") onScore(data as ScoreReadyPayload);
+        try {
+          const data = JSON.parse(event.data);
+          onMessage?.(data);
+          if (data.type === "score_ready") onScore(data as ScoreReadyPayload);
+        } catch {
+          // Malformed message — ignore rather than crashing the handler
+        }
+      };
+
+      ws.onerror = () => {
+        // Error details are intentionally opaque in the browser API.
+        // The subsequent `onclose` event will trigger reconnection logic.
       };
 
       ws.onclose = (evt) => {

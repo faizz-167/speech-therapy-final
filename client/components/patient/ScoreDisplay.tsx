@@ -125,12 +125,11 @@ function getClientFeedback(score: AttemptScore): string {
     return pickFeedback(FEEDBACK.no_speech);
   }
 
-  // Distress overrides
-  if ((emotion === "angry" || emotion === "fearful") && eScore <= 40) {
-    return pickFeedback(FEEDBACK.distress_angry);
-  }
-  if (emotion === "sad" && eScore <= 55) {
-    return pickFeedback(FEEDBACK.distress_sad);
+  // Distress overrides — reuse the shared threshold helper
+  if (isDistressEmotion(score)) {
+    return pickFeedback(
+      (emotion === "angry" || emotion === "fearful") ? FEEDBACK.distress_angry : FEEDBACK.distress_sad
+    );
   }
 
   // Level decisions

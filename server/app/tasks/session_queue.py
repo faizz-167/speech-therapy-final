@@ -4,7 +4,6 @@ Handles the in-session prompt queue: tracking pending/completed items,
 level downgrades, remedial item injection, and escalation to therapist review.
 """
 
-import json
 import uuid
 
 from app.constants import ESCALATION_INTERVENTION_LIMIT, MAX_ATTEMPTS_PER_PROMPT
@@ -163,29 +162,14 @@ def mark_prompt_terminal(cur, session_id: str, prompt_id: str, pass_fail: str, a
     if pass_fail != "pass" and attempt_number < MAX_ATTEMPTS_PER_PROMPT:
         return
 
-    cur.execute("SELECT session_notes FROM session WHERE session_id = %s", (session_id,))
-    row = cur.fetchone()
-    session_notes = {}
-    if row and row[0]:
-        try:
-            session_notes = json.loads(row[0])
-        except (TypeError, ValueError):
-            session_notes = {}
+    notes = read_session_notes(cur, session_id)
 
-    completed_prompt_ids = list(session_notes.get("completed_prompt_ids") or [])
-    passed_prompt_ids = list(session_notes.get("passed_prompt_ids") or [])
+    if prompt_id not in notes["completed_prompt_ids"]:
+        notes["completed_prompt_ids"].append(prompt_id)
+    if pass_fail == "pass" and prompt_id not in notes["passed_prompt_ids"]:
+        notes["passed_prompt_ids"].append(prompt_id)
 
-    if prompt_id not in completed_prompt_ids:
-        completed_prompt_ids.append(prompt_id)
-    if pass_fail == "pass" and prompt_id not in passed_prompt_ids:
-        passed_prompt_ids.append(prompt_id)
-
-    session_notes["completed_prompt_ids"] = completed_prompt_ids
-    session_notes["passed_prompt_ids"] = passed_prompt_ids
-    cur.execute(
-        "UPDATE session SET session_notes = %s WHERE session_id = %s",
-        (json.dumps(session_notes), session_id),
-    )
+    write_session_notes(cur, session_id, notes)
 
 
 # ---------------------------------------------------------------------------
