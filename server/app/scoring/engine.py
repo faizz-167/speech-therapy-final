@@ -9,8 +9,8 @@ class ScoringWeights:
     speech_w_fs: float = 0.15
     speech_w_srs: float = 0.10
     speech_w_cs: float = 0.05
-    fusion_w_speech: float = 0.60
-    fusion_w_engagement: float = 0.40
+    fusion_w_speech: float = 0.50
+    fusion_w_engagement: float = 0.50
     engagement_w_emotion: float = 1.00
     engagement_w_behavioral: float = 0.00
     behavioral_w_rl: float = 0.40

@@ -40,6 +40,7 @@ export interface AttemptScore {
   performance_level: string | null;
   review_recommended: boolean | null;
   fail_reason: string | null;
+  friendly_feedback: string | null;
 }
 
 export interface PollResult {

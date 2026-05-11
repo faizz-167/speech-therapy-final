@@ -75,6 +75,13 @@ async def ensure_schema_tables() -> None:
         )
         await conn.exec_driver_sql(
             "UPDATE task_scoring_weights "
+            "SET fusion_w_speech = 0.50, "
+            "    fusion_w_engagement = 0.50 "
+            "WHERE fusion_w_speech IS DISTINCT FROM 0.50 "
+            "   OR fusion_w_engagement IS DISTINCT FROM 0.50"
+        )
+        await conn.exec_driver_sql(
+            "UPDATE task_scoring_weights "
             "SET adaptive_advance_threshold = 75.0, "
             "    adaptive_stay_min = 60.0, "
             "    adaptive_stay_max = 74.0, "
@@ -83,6 +90,20 @@ async def ensure_schema_tables() -> None:
             "   OR adaptive_stay_min IS DISTINCT FROM 60.0 "
             "   OR adaptive_stay_max IS DISTINCT FROM 74.0 "
             "   OR adaptive_drop_threshold IS DISTINCT FROM 60.0"
+        )
+        await conn.exec_driver_sql(
+            "ALTER TABLE IF EXISTS patient "
+            "ADD COLUMN IF NOT EXISTS current_streak INTEGER DEFAULT 0"
+        )
+        await conn.exec_driver_sql(
+            "ALTER TABLE IF EXISTS patient "
+            "ADD COLUMN IF NOT EXISTS longest_streak INTEGER DEFAULT 0"
+        )
+        await conn.exec_driver_sql(
+            "UPDATE patient SET current_streak = 0 WHERE current_streak IS NULL"
+        )
+        await conn.exec_driver_sql(
+            "UPDATE patient SET longest_streak = 0 WHERE longest_streak IS NULL"
         )
 
 @app.get("/health")
