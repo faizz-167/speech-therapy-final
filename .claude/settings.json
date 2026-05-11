@@ -1,6 +1,0 @@
-{
-  "statusLine": {
-    "type": "command",
-    "command": "bash 'D:/speech_therapy_new/speech-therapy-final/.claude/statusline-command.sh'"
-  }
-}
